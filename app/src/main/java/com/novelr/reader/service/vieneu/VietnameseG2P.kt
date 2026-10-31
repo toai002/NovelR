@@ -351,6 +351,6 @@ class VietnameseG2P(private val context: Context) {
         }
 
         val nucleusIpa = VOWEL_IPA[rest] ?: rest.map { VOWEL_IPA[it.toString()] ?: it.toString() }.joinToString("")
-        return "$onsetIpaˈ$nucleusIpa$tone$codaIpa"
+        return "${onsetIpa}ˈ${nucleusIpa}${tone}${codaIpa}"
     }
 }
