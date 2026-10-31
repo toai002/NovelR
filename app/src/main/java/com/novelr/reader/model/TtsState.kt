@@ -9,14 +9,14 @@ enum class PlaybackStatus {
 
 enum class TtsEngineType {
     NATIVE_SYSTEM,      // Hệ thống Android TTS (Google, Samsung...)
-    VIENEU_ON_DEVICE    // VieNeu-TTS AI chạy ONNX On-Device offline
+    VIENEU_ON_DEVICE    // VieNeu-TTS v3 Nano AI chạy ONNX On-Device offline
 }
 
 enum class VieNeuModelStatus {
-    NOT_DOWNLOADED,     // Chưa tải model về máy
+    NOT_DOWNLOADED,     // Chưa tải model về máy (~268 MB trên HuggingFace)
     DOWNLOADING,        // Đang tải weights ONNX
     READY,              // Đã sẵn sàng chạy offline
-    ERROR               // Lỗi nạp model
+    ERROR               // Lỗi nạp hoặc tải model
 }
 
 data class VieNeuVoice(
@@ -36,7 +36,7 @@ data class TtsSettings(
     val pitch: Float = 1.0f,
     val enginePackage: String? = null,
     val engineType: TtsEngineType = TtsEngineType.NATIVE_SYSTEM,
-    val selectedVieNeuVoice: String = "hai_dang",
+    val selectedVieNeuVoice: String = "duc_tri",
     val lookaheadBufferSize: Int = 2 // Số câu tổng hợp trước vào RAM
 )
 
@@ -52,7 +52,7 @@ data class ReaderUiState(
     val errorMessage: String? = null,
 
     // VieNeu AI On-Device States
-    val vieneuModelStatus: VieNeuModelStatus = VieNeuModelStatus.READY,
+    val vieneuModelStatus: VieNeuModelStatus = VieNeuModelStatus.NOT_DOWNLOADED,
     val vieneuDownloadProgress: Float = 0f,
     val prebufferedIndices: Set<Int> = emptySet(), // Tập hợp các chỉ số câu đã nạp sẵn vào RAM
     val isSynthesizing: Boolean = false            // Đang tính toán suy luận ONNX

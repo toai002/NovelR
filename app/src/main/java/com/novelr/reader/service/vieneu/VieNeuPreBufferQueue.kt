@@ -100,6 +100,7 @@ class VieNeuPreBufferQueue(
     ) {
         currentPrefetchJob?.cancel()
         if (sentences.isEmpty() || startIndex >= sentences.size) return
+        if (engine.modelStatus.value != com.novelr.reader.model.VieNeuModelStatus.READY) return
 
         currentPrefetchJob = scope.launch(Dispatchers.Default) {
             val lookahead = settings.lookaheadBufferSize.coerceIn(1, 4)

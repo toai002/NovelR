@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.sp
 import com.novelr.reader.model.PlaybackStatus
 import com.novelr.reader.model.ReaderUiState
 import com.novelr.reader.model.TtsEngineType
+import com.novelr.reader.model.VieNeuModelStatus
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -156,6 +157,8 @@ fun ReaderScreen(
                 totalSentences = uiState.sentences.size,
                 playbackStatus = uiState.playbackStatus,
                 isVieNeu = uiState.settings.engineType == TtsEngineType.VIENEU_ON_DEVICE,
+                vieneuStatus = uiState.vieneuModelStatus,
+                downloadProgress = uiState.vieneuDownloadProgress,
                 isSynthesizing = uiState.isSynthesizing,
                 bufferedCount = uiState.prebufferedIndices.size,
                 onPrevious = onPreviousSentence,
@@ -294,6 +297,8 @@ fun StickyPlaybackBar(
     totalSentences: Int,
     playbackStatus: PlaybackStatus,
     isVieNeu: Boolean,
+    vieneuStatus: VieNeuModelStatus,
+    downloadProgress: Float,
     isSynthesizing: Boolean,
     bufferedCount: Int,
     onPrevious: () -> Unit,
@@ -344,12 +349,30 @@ fun StickyPlaybackBar(
                                 imageVector = Icons.Default.Memory,
                                 contentDescription = null,
                                 modifier = Modifier.size(11.dp),
-                                tint = if (isSynthesizing) MaterialTheme.colorScheme.primary else Color(0xFF2E7D32)
+                                tint = if (isSynthesizing || vieneuStatus != VieNeuModelStatus.READY) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    Color(0xFF2E7D32)
+                                }
                             )
+                            val statusLabel = when {
+                                vieneuStatus == VieNeuModelStatus.DOWNLOADING ->
+                                    " Đang tải VieNeu AI: ${(downloadProgress * 100).toInt()}%"
+                                vieneuStatus != VieNeuModelStatus.READY ->
+                                    " Cần tải gói VieNeu AI (~256MB)"
+                                isSynthesizing ->
+                                    " Đang tổng hợp ONNX..."
+                                else ->
+                                    " RAM đệm: $bufferedCount câu"
+                            }
                             Text(
-                                text = if (isSynthesizing) " Đang tính toán ONNX..." else " RAM đệm: $bufferedCount câu",
+                                text = statusLabel,
                                 fontSize = 10.sp,
-                                color = if (isSynthesizing) MaterialTheme.colorScheme.primary else Color(0xFF2E7D32)
+                                color = if (isSynthesizing || vieneuStatus != VieNeuModelStatus.READY) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    Color(0xFF2E7D32)
+                                }
                             )
                         }
                     }

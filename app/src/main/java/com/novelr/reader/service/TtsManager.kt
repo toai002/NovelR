@@ -9,6 +9,7 @@ import com.novelr.reader.model.EngineInfo
 import com.novelr.reader.model.PlaybackStatus
 import com.novelr.reader.model.TtsEngineType
 import com.novelr.reader.model.TtsSettings
+import com.novelr.reader.model.VieNeuModelStatus
 import com.novelr.reader.service.vieneu.VieNeuAudioPlayer
 import com.novelr.reader.service.vieneu.VieNeuEngine
 import com.novelr.reader.service.vieneu.VieNeuPreBufferQueue
@@ -33,7 +34,7 @@ class TtsManager(
     // --- Native TTS Engine ---
     private var textToSpeech: TextToSpeech? = null
 
-    // --- VieNeu AI On-Device Engine ---
+    // --- VieNeu AI On-Device Engine (v3 Nano ONNX 24kHz) ---
     val vieneuEngine = VieNeuEngine(context)
     private val vieneuAudioPlayer = VieNeuAudioPlayer(scope)
     val vieneuPreBufferQueue = VieNeuPreBufferQueue(vieneuEngine, scope)
@@ -64,6 +65,22 @@ class TtsManager(
 
     init {
         initializeNativeTts(enginePackage = null)
+
+        // Khi model VieNeu-TTS v3 Nano vừa tải xong, tự động kích hoạt prefetch các câu tiếp theo vào RAM
+        scope.launch {
+            vieneuEngine.modelStatus.collect { status ->
+                if (status == VieNeuModelStatus.READY &&
+                    _settings.value.engineType == TtsEngineType.VIENEU_ON_DEVICE &&
+                    _sentences.value.isNotEmpty()
+                ) {
+                    vieneuPreBufferQueue.triggerPrefetch(
+                        startIndex = _currentIndex.value,
+                        sentences = _sentences.value,
+                        settings = _settings.value
+                    )
+                }
+            }
+        }
     }
 
     fun initializeNativeTts(enginePackage: String?) {
@@ -160,7 +177,10 @@ class TtsManager(
         _sentences.value = newSentences
         _currentIndex.value = startIndex.coerceIn(0, (newSentences.size - 1).coerceAtLeast(0))
 
-        if (_settings.value.engineType == TtsEngineType.VIENEU_ON_DEVICE && newSentences.isNotEmpty()) {
+        if (_settings.value.engineType == TtsEngineType.VIENEU_ON_DEVICE &&
+            vieneuEngine.modelStatus.value == VieNeuModelStatus.READY &&
+            newSentences.isNotEmpty()
+        ) {
             vieneuPreBufferQueue.triggerPrefetch(
                 startIndex = _currentIndex.value,
                 sentences = newSentences,
@@ -179,6 +199,7 @@ class TtsManager(
 
         // Nếu đang tạm dừng giữa câu ở chế độ VieNeu AI, tiếp tục phát mượt mà tại đúng vị trí dừng
         if (_settings.value.engineType == TtsEngineType.VIENEU_ON_DEVICE &&
+            vieneuEngine.modelStatus.value == VieNeuModelStatus.READY &&
             _playbackStatus.value == PlaybackStatus.PAUSED &&
             vieneuAudioPlayer.isPausedMidSentence()
         ) {
@@ -195,11 +216,8 @@ class TtsManager(
     fun pause() {
         if (_playbackStatus.value != PlaybackStatus.PLAYING) return
         _playbackStatus.value = PlaybackStatus.PAUSED
-        if (_settings.value.engineType == TtsEngineType.VIENEU_ON_DEVICE) {
-            vieneuAudioPlayer.pause()
-        } else {
-            textToSpeech?.stop()
-        }
+        vieneuAudioPlayer.pause()
+        textToSpeech?.stop()
     }
 
     fun stop() {
@@ -234,7 +252,9 @@ class TtsManager(
 
         if (_playbackStatus.value == PlaybackStatus.PLAYING) {
             speakSentence(clamped)
-        } else if (_settings.value.engineType == TtsEngineType.VIENEU_ON_DEVICE) {
+        } else if (_settings.value.engineType == TtsEngineType.VIENEU_ON_DEVICE &&
+            vieneuEngine.modelStatus.value == VieNeuModelStatus.READY
+        ) {
             vieneuPreBufferQueue.triggerPrefetch(clamped, list, _settings.value)
         }
     }
@@ -244,7 +264,16 @@ class TtsManager(
         if (index !in list.indices) return
 
         if (_settings.value.engineType == TtsEngineType.VIENEU_ON_DEVICE) {
-            speakWithVieNeu(index)
+            if (vieneuEngine.modelStatus.value == VieNeuModelStatus.READY) {
+                speakWithVieNeu(index)
+            } else {
+                // Tự động tải gói mô hình ONNX thật (~256MB) từ HuggingFace nếu chưa tải,
+                // đồng thời phát câu hiện tại bằng giọng tiếng Việt hệ thống để người dùng nghe rõ chữ ngay lập tức!
+                if (vieneuEngine.modelStatus.value == VieNeuModelStatus.NOT_DOWNLOADED) {
+                    downloadVieNeuModel()
+                }
+                speakWithNativeTts(index)
+            }
         } else {
             speakWithNativeTts(index)
         }
@@ -273,6 +302,12 @@ class TtsManager(
 
             if (_playbackStatus.value != PlaybackStatus.PLAYING) return@launch
 
+            if (pcm.isEmpty()) {
+                // Nếu câu chưa tổng hợp được qua ONNX, chuyển tiếp mượt sang giọng hệ thống
+                speakWithNativeTts(index)
+                return@launch
+            }
+
             vieneuAudioPlayer.playPcm(
                 pcmData = pcm,
                 onStart = {
@@ -284,7 +319,7 @@ class TtsManager(
                             if (index + 1 < list.size) {
                                 val nextIdx = index + 1
                                 _currentIndex.value = nextIdx
-                                speakWithVieNeu(nextIdx)
+                                speakSentence(nextIdx)
                             } else {
                                 _playbackStatus.value = PlaybackStatus.COMPLETED
                             }
@@ -313,10 +348,19 @@ class TtsManager(
             vieneuSynthesisJob?.cancel()
             vieneuAudioPlayer.stop()
             textToSpeech?.stop()
+
+            if (newSettings.engineType == TtsEngineType.VIENEU_ON_DEVICE &&
+                vieneuEngine.modelStatus.value == VieNeuModelStatus.NOT_DOWNLOADED
+            ) {
+                downloadVieNeuModel()
+            }
+
             if (wasPlaying) {
                 _playbackStatus.value = PlaybackStatus.PLAYING
                 speakSentence(_currentIndex.value)
-            } else if (newSettings.engineType == TtsEngineType.VIENEU_ON_DEVICE) {
+            } else if (newSettings.engineType == TtsEngineType.VIENEU_ON_DEVICE &&
+                vieneuEngine.modelStatus.value == VieNeuModelStatus.READY
+            ) {
                 vieneuPreBufferQueue.triggerPrefetch(_currentIndex.value, _sentences.value, newSettings)
             }
             return
@@ -327,7 +371,7 @@ class TtsManager(
                 vieneuPreBufferQueue.clearCache()
                 if (wasPlaying) {
                     speakSentence(_currentIndex.value)
-                } else {
+                } else if (vieneuEngine.modelStatus.value == VieNeuModelStatus.READY) {
                     vieneuPreBufferQueue.triggerPrefetch(_currentIndex.value, _sentences.value, newSettings)
                 }
             } else if (oldSettings.lookaheadBufferSize != newSettings.lookaheadBufferSize) {

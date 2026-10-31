@@ -153,7 +153,7 @@ fun SettingsSheet(
                                                 modifier = Modifier.size(14.dp)
                                             )
                                             Text(
-                                                text = " Sẵn sàng",
+                                                text = " Đã tải (24kHz)",
                                                 color = Color(0xFF2E7D32),
                                                 fontSize = 12.sp,
                                                 fontWeight = FontWeight.Bold
@@ -162,19 +162,33 @@ fun SettingsSheet(
                                     }
                                 }
                                 VieNeuModelStatus.DOWNLOADING -> {
+                                    val downloadedMb = (downloadProgress * 256).toInt()
                                     Text(
-                                        text = "${(downloadProgress * 100).toInt()}%",
+                                        text = "$downloadedMb/256 MB (${(downloadProgress * 100).toInt()}%)",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                VieNeuModelStatus.ERROR -> {
+                                    Text(
+                                        text = "Cần tải lại",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                        fontWeight = FontWeight.Bold
                                     )
                                 }
                                 else -> {}
                             }
                         }
 
-                        if (vieneuStatus == VieNeuModelStatus.NOT_DOWNLOADED) {
+                        if (vieneuStatus == VieNeuModelStatus.NOT_DOWNLOADED || vieneuStatus == VieNeuModelStatus.ERROR) {
                             Text(
-                                text = "Tải gói weights (~150MB) để suy luận giọng đọc AI ngoại tuyến mà không cần Internet.",
+                                text = if (vieneuStatus == VieNeuModelStatus.ERROR) {
+                                    "Kết nối gián đoạn khi tải model từ HuggingFace. Nhấn bên dưới để tiếp tục tải (~256MB)."
+                                } else {
+                                    "Tải bộ 4 mô hình ONNX thật của VieNeu-TTS v3 Nano (~256MB) một lần duy nhất để đọc offline. Trong lúc tải, app vẫn đọc bình thường bằng giọng hệ thống."
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.outline
                             )
@@ -183,9 +197,17 @@ fun SettingsSheet(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Icon(Icons.Default.CloudDownload, contentDescription = null)
-                                Text(" Tải Gói Giọng Đọc Offline")
+                                Text(
+                                    if (vieneuStatus == VieNeuModelStatus.ERROR) " Tải Tiếp Gói Giọng Đọc AI (~256MB)"
+                                    else " Tải Gói Giọng Đọc AI (~256MB)"
+                                )
                             }
                         } else if (vieneuStatus == VieNeuModelStatus.DOWNLOADING) {
+                            Text(
+                                text = "Đang tải bộ mô hình VieNeu-TTS v3 Nano từ HuggingFace... Bạn có thể đóng bảng này và nghe đọc bình thường.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.outline
+                            )
                             LinearProgressIndicator(
                                 progress = { downloadProgress },
                                 modifier = Modifier.fillMaxWidth()
