@@ -94,6 +94,9 @@ class MainActivity : ComponentActivity() {
                             PasteScreen(
                                 rawText = uiState.rawText,
                                 bookTitle = uiState.bookTitle,
+                                activeSentenceCount = uiState.sentences.size,
+                                activeSentenceIndex = uiState.currentIndex,
+                                onResumeActiveSession = { currentScreen = CurrentScreen.READER },
                                 onTextChanged = viewModel::onTextChanged,
                                 onPickTxtFile = { uri ->
                                     viewModel.loadTxtFile(
@@ -130,10 +133,12 @@ class MainActivity : ComponentActivity() {
                                 onSeekToSentence = viewModel::seekToSentence,
                                 onIncreaseFontSize = viewModel::increaseFontSize,
                                 onDecreaseFontSize = viewModel::decreaseFontSize,
+                                onReadingThemeChange = viewModel::updateReadingTheme,
                                 onSpeechRateChange = viewModel::updateSpeechRate,
                                 onPitchChange = viewModel::updatePitch,
                                 onSentencePauseChange = viewModel::updateSentencePause,
                                 onBackgroundPlaybackChange = viewModel::updateBackgroundPlayback,
+                                onResetVoiceDefaults = viewModel::resetVoiceSettingsToDefault,
                                 onRequestIgnoreBatteryOptimizations = ::requestIgnoreBatteryOptimizations,
                                 onEngineSelected = viewModel::selectEngine,
                                 onEngineTypeSelected = viewModel::selectEngineType,

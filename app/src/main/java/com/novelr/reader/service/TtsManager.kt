@@ -13,6 +13,7 @@ import com.novelr.reader.model.VieNeuModelStatus
 import com.novelr.reader.service.vieneu.VieNeuAudioPlayer
 import com.novelr.reader.service.vieneu.VieNeuEngine
 import com.novelr.reader.service.vieneu.VieNeuPreBufferQueue
+import com.novelr.reader.util.ReaderPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -56,7 +57,7 @@ class TtsManager(
     private val _availableEngines = MutableStateFlow<List<EngineInfo>>(emptyList())
     val availableEngines: StateFlow<List<EngineInfo>> = _availableEngines.asStateFlow()
 
-    private val _settings = MutableStateFlow(TtsSettings())
+    private val _settings = MutableStateFlow(ReaderPreferences.loadSettings(context))
     val settings: StateFlow<TtsSettings> = _settings.asStateFlow()
 
     private val _isInitialized = MutableStateFlow(false)
@@ -380,6 +381,7 @@ class TtsManager(
 
         val wasPlaying = _playbackStatus.value == PlaybackStatus.PLAYING
         _settings.value = newSettings
+        ReaderPreferences.saveSettings(context, newSettings)
 
         textToSpeech?.let { applySettingsToNative(it, newSettings) }
 
@@ -432,6 +434,11 @@ class TtsManager(
                 speakSentence(_currentIndex.value)
             }
         }
+    }
+
+    fun resetVoiceSettingsToDefault() {
+        val reset = _settings.value.resetVoiceToDefault()
+        updateSettings(reset)
     }
 
     fun downloadVieNeuModel() {

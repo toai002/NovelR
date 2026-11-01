@@ -6,9 +6,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.novelr.reader.model.PlaybackStatus
 import com.novelr.reader.model.ReaderUiState
+import com.novelr.reader.model.ReadingTheme
 import com.novelr.reader.model.TtsEngineType
 import com.novelr.reader.service.TtsAudioService
 import com.novelr.reader.service.TtsManager
+import com.novelr.reader.util.ReaderPreferences
 import com.novelr.reader.util.TextSplitter
 import com.novelr.reader.util.TxtFileLoader
 import kotlinx.coroutines.Dispatchers
@@ -28,12 +30,18 @@ class ReaderViewModel : ViewModel() {
     val uiState: StateFlow<ReaderUiState> = _uiState.asStateFlow()
 
     private var ttsManager: TtsManager? = null
+    private var appContext: Context? = null
     private val observerJobs = mutableListOf<Job>()
 
     fun attachService(service: TtsAudioService) {
         val manager = service.ttsManager
         if (this.ttsManager === manager && observerJobs.isNotEmpty()) return
         this.ttsManager = manager
+        this.appContext = service.applicationContext
+
+        val savedFont = ReaderPreferences.loadFontSize(service.applicationContext)
+        val savedTheme = ReaderPreferences.loadReadingTheme(service.applicationContext)
+        _uiState.update { it.copy(fontSizeSp = savedFont, readingTheme = savedTheme) }
 
         observerJobs.forEach { it.cancel() }
         observerJobs.clear()
@@ -174,11 +182,26 @@ class ReaderViewModel : ViewModel() {
     }
 
     fun increaseFontSize() {
-        _uiState.update { it.copy(fontSizeSp = (it.fontSizeSp + 2f).coerceAtMost(32f)) }
+        _uiState.update { state ->
+            val next = (state.fontSizeSp + 2f).coerceAtMost(32f)
+            appContext?.let { ReaderPreferences.saveFontSize(it, next) }
+            state.copy(fontSizeSp = next)
+        }
     }
 
     fun decreaseFontSize() {
-        _uiState.update { it.copy(fontSizeSp = (it.fontSizeSp - 2f).coerceAtLeast(12f)) }
+        _uiState.update { state ->
+            val next = (state.fontSizeSp - 2f).coerceAtLeast(14f)
+            appContext?.let { ReaderPreferences.saveFontSize(it, next) }
+            state.copy(fontSizeSp = next)
+        }
+    }
+
+    fun updateReadingTheme(theme: ReadingTheme) {
+        _uiState.update { state ->
+            appContext?.let { ReaderPreferences.saveReadingTheme(it, theme) }
+            state.copy(readingTheme = theme)
+        }
     }
 
     fun updateSpeechRate(rate: Float) {
@@ -199,6 +222,10 @@ class ReaderViewModel : ViewModel() {
     fun updateBackgroundPlayback(enabled: Boolean) {
         val newSettings = _uiState.value.settings.copy(backgroundPlayback = enabled)
         ttsManager?.updateSettings(newSettings)
+    }
+
+    fun resetVoiceSettingsToDefault() {
+        ttsManager?.resetVoiceSettingsToDefault()
     }
 
     fun selectEngine(enginePackage: String) {

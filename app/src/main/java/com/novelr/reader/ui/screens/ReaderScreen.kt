@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -26,7 +28,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -41,9 +42,10 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -51,6 +53,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -64,8 +67,58 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.novelr.reader.model.PlaybackStatus
 import com.novelr.reader.model.ReaderUiState
+import com.novelr.reader.model.ReadingTheme
 import com.novelr.reader.model.TtsEngineType
 import com.novelr.reader.model.VieNeuModelStatus
+import com.novelr.reader.service.vieneu.VieNeuConstants
+import java.util.Locale
+import kotlin.math.roundToInt
+
+private data class ReaderPalette(
+    val pageBg: Color,
+    val cardBg: Color,
+    val activeCardBg: Color,
+    val activeBorder: Color,
+    val textPrimary: Color,
+    val activeTextPrimary: Color,
+    val textSecondary: Color
+)
+
+@Composable
+private fun rememberReaderPalette(theme: ReadingTheme): ReaderPalette {
+    val scheme = MaterialTheme.colorScheme
+    return remember(theme, scheme) {
+        when (theme) {
+            ReadingTheme.SEPIA -> ReaderPalette(
+                pageBg = Color(0xFFF6EFE2),
+                cardBg = Color(0xFFFAF5EB),
+                activeCardBg = Color(0xFFEBDCC3),
+                activeBorder = Color(0xFF9C5A25),
+                textPrimary = Color(0xFF2B2118),
+                activeTextPrimary = Color(0xFF1F160E),
+                textSecondary = Color(0xFF756352)
+            )
+            ReadingTheme.DARK -> ReaderPalette(
+                pageBg = Color(0xFF111317),
+                cardBg = Color(0xFF1A1D24),
+                activeCardBg = Color(0xFF233247),
+                activeBorder = Color(0xFF60A5FA),
+                textPrimary = Color(0xFFD6DAE1),
+                activeTextPrimary = Color(0xFFFFFFFF),
+                textSecondary = Color(0xFF8B94A3)
+            )
+            ReadingTheme.LIGHT -> ReaderPalette(
+                pageBg = Color(0xFFF4F6F9),
+                cardBg = Color(0xFFFFFFFF),
+                activeCardBg = scheme.primaryContainer,
+                activeBorder = scheme.primary,
+                textPrimary = scheme.onSurface,
+                activeTextPrimary = scheme.onPrimaryContainer,
+                textSecondary = scheme.outline
+            )
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,10 +132,12 @@ fun ReaderScreen(
     onSeekToSentence: (Int) -> Unit,
     onIncreaseFontSize: () -> Unit,
     onDecreaseFontSize: () -> Unit,
+    onReadingThemeChange: (ReadingTheme) -> Unit,
     onSpeechRateChange: (Float) -> Unit,
     onPitchChange: (Float) -> Unit,
     onSentencePauseChange: (Int) -> Unit,
     onBackgroundPlaybackChange: (Boolean) -> Unit,
+    onResetVoiceDefaults: () -> Unit,
     onRequestIgnoreBatteryOptimizations: () -> Unit,
     onEngineSelected: (String) -> Unit,
     onEngineTypeSelected: (TtsEngineType) -> Unit,
@@ -92,6 +147,11 @@ fun ReaderScreen(
 ) {
     val listState = rememberLazyListState()
     var showSettingsSheet by remember { mutableStateOf(false) }
+    val palette = rememberReaderPalette(uiState.readingTheme)
+
+    val activeVoiceName = remember(uiState.settings.selectedVieNeuVoice) {
+        VieNeuConstants.PRESET_VOICES.find { it.id == uiState.settings.selectedVieNeuVoice }?.name ?: "Đức Trí"
+    }
 
     val txtPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -105,12 +165,13 @@ fun ReaderScreen(
         if (uiState.sentences.isNotEmpty() && uiState.currentIndex in uiState.sentences.indices) {
             listState.animateScrollToItem(
                 index = uiState.currentIndex,
-                scrollOffset = -150
+                scrollOffset = -180
             )
         }
     }
 
     Scaffold(
+        containerColor = palette.pageBg,
         topBar = {
             TopAppBar(
                 title = {
@@ -118,15 +179,17 @@ fun ReaderScreen(
                         val headerTitle = if (uiState.bookTitle.isNotBlank()) {
                             uiState.bookTitle
                         } else {
-                            "Đang đọc (${uiState.currentIndex + 1}/${uiState.sentences.size.coerceAtLeast(1)})"
+                            "Đang đọc sách (${uiState.currentIndex + 1}/${uiState.sentences.size.coerceAtLeast(1)})"
                         }
                         Text(
                             text = headerTitle,
                             style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            val rateText = String.format(Locale.US, "%.2fx", uiState.settings.speechRate)
                             if (uiState.settings.engineType == TtsEngineType.VIENEU_ON_DEVICE) {
                                 Icon(
                                     imageVector = Icons.Default.Psychology,
@@ -135,21 +198,13 @@ fun ReaderScreen(
                                     tint = MaterialTheme.colorScheme.primary
                                 )
                                 Text(
-                                    text = if (uiState.settings.backgroundPlayback) {
-                                        " VieNeu AI • Chạy nền BẬT"
-                                    } else {
-                                        " VieNeu AI (On-Device)"
-                                    },
+                                    text = " VieNeu ($activeVoiceName • $rateText)",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary
                                 )
                             } else {
                                 Text(
-                                    text = if (uiState.settings.backgroundPlayback) {
-                                        "Hệ thống TTS • Chạy nền BẬT"
-                                    } else {
-                                        "Hệ thống TTS"
-                                    },
+                                    text = "Hệ thống TTS ($rateText)",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.outline
                                 )
@@ -166,16 +221,11 @@ fun ReaderScreen(
                     IconButton(
                         onClick = { txtPickerLauncher.launch(arrayOf("text/plain", "text/*")) }
                     ) {
-                        Icon(Icons.Default.FolderOpen, contentDescription = "Mở file .TXT khác")
+                        Icon(Icons.Default.FolderOpen, contentDescription = "Mở file .TXT")
                     }
                     IconButton(onClick = onDecreaseFontSize) {
                         Text("A-", fontWeight = FontWeight.Bold)
                     }
-                    Icon(
-                        imageVector = Icons.Default.FormatSize,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
                     IconButton(onClick = onIncreaseFontSize) {
                         Text("A+", fontWeight = FontWeight.Bold)
                     }
@@ -184,7 +234,7 @@ fun ReaderScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f)
                 )
             )
         },
@@ -193,14 +243,17 @@ fun ReaderScreen(
                 currentIndex = uiState.currentIndex,
                 totalSentences = uiState.sentences.size,
                 playbackStatus = uiState.playbackStatus,
+                speechRate = uiState.settings.speechRate,
                 isVieNeu = uiState.settings.engineType == TtsEngineType.VIENEU_ON_DEVICE,
                 vieneuStatus = uiState.vieneuModelStatus,
                 downloadProgress = uiState.vieneuDownloadProgress,
                 isSynthesizing = uiState.isSynthesizing,
                 bufferedCount = uiState.prebufferedIndices.size,
+                onSeekToSentence = onSeekToSentence,
                 onPrevious = onPreviousSentence,
                 onTogglePlayPause = onTogglePlayPause,
-                onNext = onNextSentence
+                onNext = onNextSentence,
+                onOpenSettings = { showSettingsSheet = true }
             )
         }
     ) { innerPadding ->
@@ -208,9 +261,10 @@ fun ReaderScreen(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
+                .background(palette.pageBg)
                 .padding(innerPadding),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             itemsIndexed(
                 items = uiState.sentences,
@@ -226,6 +280,7 @@ fun ReaderScreen(
                     isCurrent = isCurrent,
                     isPrebuffered = isPrebuffered && isVieNeu,
                     fontSizeSp = uiState.fontSizeSp,
+                    palette = palette,
                     onClick = { onSeekToSentence(index) }
                 )
             }
@@ -235,6 +290,7 @@ fun ReaderScreen(
     if (showSettingsSheet) {
         SettingsSheet(
             settings = uiState.settings,
+            readingTheme = uiState.readingTheme,
             availableEngines = uiState.availableEngines,
             vieneuStatus = uiState.vieneuModelStatus,
             downloadProgress = uiState.vieneuDownloadProgress,
@@ -242,6 +298,8 @@ fun ReaderScreen(
             onPitchChange = onPitchChange,
             onSentencePauseChange = onSentencePauseChange,
             onBackgroundPlaybackChange = onBackgroundPlaybackChange,
+            onReadingThemeChange = onReadingThemeChange,
+            onResetVoiceDefaults = onResetVoiceDefaults,
             onRequestIgnoreBatteryOptimizations = onRequestIgnoreBatteryOptimizations,
             onEngineSelected = onEngineSelected,
             onEngineTypeSelected = onEngineTypeSelected,
@@ -254,29 +312,22 @@ fun ReaderScreen(
 }
 
 @Composable
-fun SentenceItemCard(
+private fun SentenceItemCard(
     sentence: String,
     index: Int,
     isCurrent: Boolean,
     isPrebuffered: Boolean,
     fontSizeSp: Float,
+    palette: ReaderPalette,
     onClick: () -> Unit
 ) {
     val containerColor by animateColorAsState(
-        targetValue = if (isCurrent) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surface
-        },
+        targetValue = if (isCurrent) palette.activeCardBg else palette.cardBg,
         label = "SentenceBgColor"
     )
 
     val contentColor by animateColorAsState(
-        targetValue = if (isCurrent) {
-            MaterialTheme.colorScheme.onPrimaryContainer
-        } else {
-            MaterialTheme.colorScheme.onSurface
-        },
+        targetValue = if (isCurrent) palette.activeTextPrimary else palette.textPrimary,
         label = "SentenceTextColor"
     )
 
@@ -285,34 +336,35 @@ fun SentenceItemCard(
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
+        border = if (isCurrent) BorderStroke(1.5.dp, palette.activeBorder) else null,
         colors = CardDefaults.cardColors(
             containerColor = containerColor,
             contentColor = contentColor
         ),
         elevation = CardDefaults.cardElevation(
-            defaultElevation = if (isCurrent) 4.dp else 0.dp
+            defaultElevation = if (isCurrent) 3.dp else 0.dp
         )
     ) {
         Row(
-            modifier = Modifier.padding(14.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.Top
         ) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(end = 10.dp, top = 2.dp)
+                modifier = Modifier.padding(end = 10.dp, top = 3.dp)
             ) {
                 Text(
-                    text = "${index + 1}.",
-                    fontSize = (fontSizeSp * 0.75f).sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                    text = "${index + 1}",
+                    fontSize = (fontSizeSp * 0.68f).sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isCurrent) palette.activeBorder else palette.textSecondary
                 )
 
                 if (isPrebuffered && !isCurrent) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Box(
                         modifier = Modifier
-                            .size(7.dp)
+                            .size(6.dp)
                             .clip(CircleShape)
                             .background(Color(0xFF2E7D32))
                     )
@@ -322,7 +374,7 @@ fun SentenceItemCard(
             Text(
                 text = sentence,
                 fontSize = fontSizeSp.sp,
-                lineHeight = (fontSizeSp * 1.45f).sp,
+                lineHeight = (fontSizeSp * 1.5f).sp,
                 fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -335,51 +387,72 @@ fun StickyPlaybackBar(
     currentIndex: Int,
     totalSentences: Int,
     playbackStatus: PlaybackStatus,
+    speechRate: Float,
     isVieNeu: Boolean,
     vieneuStatus: VieNeuModelStatus,
     downloadProgress: Float,
     isSynthesizing: Boolean,
     bufferedCount: Int,
+    onSeekToSentence: (Int) -> Unit,
     onPrevious: () -> Unit,
     onTogglePlayPause: () -> Unit,
-    onNext: () -> Unit
+    onNext: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
-    val progress = if (totalSentences > 0) {
-        (currentIndex + 1).toFloat() / totalSentences.toFloat()
-    } else {
-        0f
-    }
+    var isDraggingSlider by remember { mutableStateOf(false) }
+    var sliderPosition by remember(currentIndex) { mutableFloatStateOf(currentIndex.toFloat()) }
+
+    val remainingSentences = (totalSentences - currentIndex - 1).coerceAtLeast(0)
+    val estMinutesLeft = ((remainingSentences * 4.5f) / speechRate.coerceAtLeast(0.5f) / 60f).roundToInt()
 
     Surface(
-        shadowElevation = 10.dp,
+        shadowElevation = 12.dp,
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         modifier = Modifier.navigationBarsPadding()
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.outlineVariant
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
+            if (totalSentences > 1) {
+                Slider(
+                    value = if (isDraggingSlider) sliderPosition else currentIndex.toFloat(),
+                    onValueChange = {
+                        isDraggingSlider = true
+                        sliderPosition = it
+                    },
+                    onValueChangeFinished = {
+                        isDraggingSlider = false
+                        onSeekToSentence(sliderPosition.roundToInt().coerceIn(0, totalSentences - 1))
+                    },
+                    valueRange = 0f..(totalSentences - 1).toFloat().coerceAtLeast(1f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(24.dp),
+                    colors = SliderDefaults.colors(
+                        thumbColor = MaterialTheme.colorScheme.primary,
+                        activeTrackColor = MaterialTheme.colorScheme.primary
+                    )
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onOpenSettings() }
+                ) {
+                    val displayedIdx = if (isDraggingSlider) sliderPosition.roundToInt() + 1 else currentIndex + 1
                     Text(
-                        text = "Câu ${currentIndex + 1} / $totalSentences",
+                        text = "Câu $displayedIdx / $totalSentences • Còn ~${estMinutesLeft.coerceAtLeast(1)} phút",
                         style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     if (isVieNeu) {
@@ -398,15 +471,15 @@ fun StickyPlaybackBar(
                                 vieneuStatus == VieNeuModelStatus.DOWNLOADING ->
                                     " Đang tải VieNeu AI: ${(downloadProgress * 100).toInt()}%"
                                 vieneuStatus != VieNeuModelStatus.READY ->
-                                    " Cần tải gói VieNeu AI (~256MB)"
+                                    " Chạm để tải gói VieNeu AI (~256MB)"
                                 isSynthesizing ->
                                     " Đang tổng hợp ONNX..."
                                 else ->
-                                    " RAM đệm: $bufferedCount câu"
+                                    " RAM đệm: $bufferedCount câu sẵn sàng"
                             }
                             Text(
                                 text = statusLabel,
-                                fontSize = 10.sp,
+                                fontSize = 11.sp,
                                 color = if (isSynthesizing || vieneuStatus != VieNeuModelStatus.READY) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
@@ -414,12 +487,20 @@ fun StickyPlaybackBar(
                                 }
                             )
                         }
+                    } else {
+                        Text(
+                            text = "Chạm để chỉnh giọng & tốc độ",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.outline
+                        )
                     }
                 }
 
+                Spacer(modifier = Modifier.width(8.dp))
+
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     IconButton(
                         onClick = onPrevious,
@@ -433,7 +514,7 @@ fun StickyPlaybackBar(
 
                     FilledIconButton(
                         onClick = onTogglePlayPause,
-                        modifier = Modifier.size(52.dp),
+                        modifier = Modifier.size(50.dp),
                         colors = IconButtonDefaults.filledIconButtonColors(
                             containerColor = MaterialTheme.colorScheme.primary
                         )
@@ -445,7 +526,7 @@ fun StickyPlaybackBar(
                                 Icons.Default.PlayArrow
                             },
                             contentDescription = if (playbackStatus == PlaybackStatus.PLAYING) "Tạm dừng" else "Tiếp tục đọc",
-                            modifier = Modifier.size(30.dp)
+                            modifier = Modifier.size(28.dp)
                         )
                     }
 

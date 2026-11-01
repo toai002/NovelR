@@ -3,6 +3,7 @@ package com.novelr.reader.ui.screens
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -35,6 +37,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -44,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.novelr.reader.util.TextSplitter
+import kotlin.math.roundToInt
 
 private const val MAX_EDITOR_PREVIEW_CHARS = 35_000
 
@@ -59,16 +63,20 @@ private val SAMPLE_VIETNAMESE_TEXT = """
 fun PasteScreen(
     rawText: String,
     bookTitle: String,
+    activeSentenceCount: Int,
+    activeSentenceIndex: Int,
+    onResumeActiveSession: () -> Unit,
     onTextChanged: (String) -> Unit,
     onPickTxtFile: (Uri) -> Unit,
     onStartReading: () -> Unit
 ) {
     val clipboardManager = LocalClipboardManager.current
     val wordCount = remember(rawText) { TextSplitter.countWords(rawText) }
+    val estListenMinutes = remember(wordCount) { (wordCount / 150f).roundToInt().coerceAtLeast(1) }
     val isLargeFile = rawText.length > MAX_EDITOR_PREVIEW_CHARS
     val displayPreviewText = remember(rawText) {
         if (isLargeFile) {
-            rawText.take(MAX_EDITOR_PREVIEW_CHARS) + "\n\n... [File dài ${rawText.length} ký tự — Toàn bộ nội dung đã được nạp sẵn sàng để đọc]"
+            rawText.take(MAX_EDITOR_PREVIEW_CHARS) + "\n\n... [File dài ${rawText.length} ký tự — Toàn bộ nội dung đã nạp sẵn sàng để đọc]"
         } else {
             rawText
         }
@@ -85,7 +93,22 @@ fun PasteScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("NovelR - Đọc Sách & Truyện TTS") }
+                title = {
+                    Column {
+                        Text(
+                            text = "NovelR - Đọc Truyện AI",
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "VieNeu-TTS v3 Nano (On-Device 24kHz) & Hệ thống",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f)
+                )
             )
         },
         floatingActionButton = {
@@ -105,6 +128,56 @@ fun PasteScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // Thẻ quay lại phiên đọc đang chạy (nếu người dùng bấm Back ra ngoài)
+            if (activeSentenceCount > 0) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onResumeActiveSession() },
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                Icons.Default.Headphones,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "Tiếp tục nghe bài đang mở",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Text(
+                                    text = "Đang ở câu ${activeSentenceIndex + 1} / $activeSentenceCount • Chạm để mở trình đọc",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
+                                )
+                            }
+                        }
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+            }
+
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -180,7 +253,7 @@ fun PasteScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = "Đã nạp $wordCount từ (${rawText.length} ký tự)",
+                                    text = "$wordCount từ • Thời lượng nghe ước tính ~$estListenMinutes phút",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
                                 )
@@ -201,7 +274,7 @@ fun PasteScreen(
                     readOnly = isLargeFile,
                     modifier = Modifier.fillMaxSize(),
                     placeholder = {
-                        Text("Nhấn 'Mở File .TXT' để đọc truyện từ điện thoại, hoặc dán văn bản tiếng Việt tại đây...")
+                        Text("Nhấn 'Mở File .TXT' để chọn file truyện từ điện thoại, hoặc dán văn bản tiếng Việt tại đây...")
                     },
                     shape = MaterialTheme.shapes.medium
                 )
@@ -217,7 +290,7 @@ fun PasteScreen(
                     color = MaterialTheme.colorScheme.outline
                 )
                 Text(
-                    text = "Khoảng $wordCount từ",
+                    text = if (wordCount > 0) "$wordCount từ (~$estListenMinutes phút nghe)" else "0 từ",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.outline
                 )

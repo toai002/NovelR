@@ -19,6 +19,12 @@ enum class VieNeuModelStatus {
     ERROR               // Lỗi nạp hoặc tải model
 }
 
+enum class ReadingTheme(val label: String) {
+    SEPIA("Giấy ấm"),
+    LIGHT("Sáng"),
+    DARK("Tối dịu")
+}
+
 data class VieNeuVoice(
     val id: String,
     val name: String,
@@ -32,16 +38,46 @@ data class EngineInfo(
 )
 
 data class TtsSettings(
-    val speechRate: Float = 1.0f,
-    val pitch: Float = 1.0f,
+    val speechRate: Float = DEFAULT_SPEECH_RATE,
+    val pitch: Float = DEFAULT_PITCH,
     val enginePackage: String? = null,
     val engineType: TtsEngineType = TtsEngineType.NATIVE_SYSTEM,
-    val selectedVieNeuVoice: String = "duc_tri",
-    val lookaheadBufferSize: Int = 2,   // Số câu tổng hợp trước vào RAM
-    val sentencePauseMs: Int = 550,     // Khoảng nghỉ tự nhiên khi chuyển câu (ms)
-    val clausePauseMs: Int = 240,       // Khoảng nghỉ lấy hơi giữa các mệnh đề dấu phẩy (ms)
-    val backgroundPlayback: Boolean = true // Tiếp tục đọc chạy nền khi tắt màn hình / ẩn ứng dụng
-)
+    val selectedVieNeuVoice: String = DEFAULT_VIENEU_VOICE,
+    val lookaheadBufferSize: Int = DEFAULT_LOOKAHEAD,
+    val sentencePauseMs: Int = DEFAULT_SENTENCE_PAUSE_MS,
+    val clausePauseMs: Int = DEFAULT_CLAUSE_PAUSE_MS,
+    val backgroundPlayback: Boolean = true
+) {
+    companion object {
+        const val DEFAULT_SPEECH_RATE = 1.0f
+        const val DEFAULT_PITCH = 1.0f
+        const val DEFAULT_VIENEU_VOICE = "duc_tri"
+        const val DEFAULT_LOOKAHEAD = 2
+        const val DEFAULT_SENTENCE_PAUSE_MS = 550
+        const val DEFAULT_CLAUSE_PAUSE_MS = 240
+    }
+
+    val isDefaultVoiceConfig: Boolean
+        get() = speechRate == DEFAULT_SPEECH_RATE &&
+                pitch == DEFAULT_PITCH &&
+                selectedVieNeuVoice == DEFAULT_VIENEU_VOICE &&
+                lookaheadBufferSize == DEFAULT_LOOKAHEAD &&
+                sentencePauseMs == DEFAULT_SENTENCE_PAUSE_MS &&
+                clausePauseMs == DEFAULT_CLAUSE_PAUSE_MS
+
+    /**
+     * Khôi phục toàn bộ thông số chỉnh giọng (tốc độ, cao độ, khoảng nghỉ, nhân vật, bộ đệm)
+     * về mặc định chuẩn nhưng giữ nguyên loại Engine đang chọn.
+     */
+    fun resetVoiceToDefault(): TtsSettings = copy(
+        speechRate = DEFAULT_SPEECH_RATE,
+        pitch = DEFAULT_PITCH,
+        selectedVieNeuVoice = DEFAULT_VIENEU_VOICE,
+        lookaheadBufferSize = DEFAULT_LOOKAHEAD,
+        sentencePauseMs = DEFAULT_SENTENCE_PAUSE_MS,
+        clausePauseMs = DEFAULT_CLAUSE_PAUSE_MS
+    )
+}
 
 data class ReaderUiState(
     val rawText: String = "",
@@ -49,7 +85,8 @@ data class ReaderUiState(
     val sentences: List<String> = emptyList(),
     val currentIndex: Int = 0,
     val playbackStatus: PlaybackStatus = PlaybackStatus.IDLE,
-    val fontSizeSp: Float = 18f,
+    val fontSizeSp: Float = 19f,
+    val readingTheme: ReadingTheme = ReadingTheme.SEPIA,
     val settings: TtsSettings = TtsSettings(),
     val availableEngines: List<EngineInfo> = emptyList(),
     val isTtsInitialized: Boolean = false,

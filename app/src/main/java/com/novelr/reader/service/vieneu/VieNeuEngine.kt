@@ -82,6 +82,18 @@ class VieNeuEngine(private val context: Context) {
 
         val TOTAL_EXPECTED_BYTES = MODEL_SPECS.sumOf { it.expectedBytes }
 
+        // Lưới thời gian Sway-Euler 5 bước được tính sẵn (Constant Folding) để tránh tính lại cos() ở mỗi mệnh đề
+        private const val ODE_STEPS = 5
+        private const val CFG_ACTIVE_STEPS = 3
+        private const val CFG_SCALE = 2.5f
+        private val SWAY_TIME_GRID = FloatArray(ODE_STEPS + 1) { idx ->
+            val u = idx.toDouble() / ODE_STEPS.toDouble()
+            (u - 1.0 * (cos(PI * 0.5 * u) - 1.0 + u)).toFloat()
+        }
+        private val SWAY_DT_GRID = FloatArray(ODE_STEPS) { step ->
+            SWAY_TIME_GRID[step + 1] - SWAY_TIME_GRID[step]
+        }
+
         // Ánh xạ tương thích ngược nếu cấu hình cũ còn lưu ID giọng cũ
         private val LEGACY_VOICE_ALIAS = mapOf(
             "hai_dang" to "duc_tri",
@@ -571,12 +583,6 @@ class VieNeuEngine(private val context: Context) {
             ?: voiceMap.values.firstOrNull()
             ?: return ShortArray(0)
 
-        // Tối ưu Sway-Euler: 5 bước ODE + Truncated CFG ở 3 bước đầu (tổng 8 NFE thay vì 16 NFE -> Nhanh gấp 2x)
-        val steps = 5
-        val cfgActiveSteps = 3
-        val cfgScale = 2.5f
-        val swayCoef = -1.0
-
         OnnxTensor.createTensor(env, LongBuffer.wrap(ids), longArrayOf(1L, seqLen.toLong())).use { idsTensor ->
             OnnxTensor.createTensor(env, FloatBuffer.wrap(voice.style), longArrayOf(1L, 50L, 256L)).use { styleTensor ->
                 OnnxTensor.createTensor(env, FloatBuffer.wrap(voice.spk), longArrayOf(1L, 192L)).use { spkTensor ->
@@ -601,15 +607,10 @@ class VieNeuEngine(private val context: Context) {
                             val durationSec = (exp(logSeconds.toDouble()) / clampedSpeed).coerceIn(0.25, 12.0)
                             val latentFrames = (durationSec * VieNeuConstants.FLOW_FPS).roundToInt().coerceAtLeast(2)
 
-                            // Bước 3: Khởi tạo nhiễu Gaussian x [1, 144, T] và lưới thời gian Sway-Euler
+                            // Bước 3: Khởi tạo nhiễu Gaussian x [1, 144, T]
                             val latentSize = 144 * latentFrames
                             val rng = Random(42L)
                             val x = FloatArray(latentSize) { rng.nextGaussian().toFloat() }
-
-                            val timeGrid = DoubleArray(steps + 1) { idx ->
-                                val u = idx.toDouble() / steps.toDouble()
-                                u + swayCoef * (cos(PI * 0.5 * u) - 1.0 + u)
-                            }
 
                             val nullCtxFlat = FloatArray(seqLen * 256)
                             val nullMaskArray = arrayOf(BooleanArray(seqLen) { false })
@@ -620,9 +621,9 @@ class VieNeuEngine(private val context: Context) {
                                         OnnxTensor.createTensor(env, FloatBuffer.wrap(nullStyle), longArrayOf(1L, 50L, 256L)).use { nullStyleTensor ->
 
                                             // Giải ODE 5 bước với Truncated CFG trên Vector Estimator
-                                            for (step in 0 until steps) {
-                                                val tVal = floatArrayOf(timeGrid[step].toFloat())
-                                                val dt = (timeGrid[step + 1] - timeGrid[step]).toFloat()
+                                            for (step in 0 until ODE_STEPS) {
+                                                val tVal = floatArrayOf(SWAY_TIME_GRID[step])
+                                                val dt = SWAY_DT_GRID[step]
 
                                                 OnnxTensor.createTensor(env, FloatBuffer.wrap(x), longArrayOf(1L, 144L, latentFrames.toLong())).use { xTensor ->
                                                     OnnxTensor.createTensor(env, FloatBuffer.wrap(tVal), longArrayOf(1L)).use { tTensor ->
@@ -637,7 +638,7 @@ class VieNeuEngine(private val context: Context) {
                                                             )
                                                         ).use { out -> extractFloatArray(out[0] as OnnxTensor) }
 
-                                                        if (step < cfgActiveSteps) {
+                                                        if (step < CFG_ACTIVE_STEPS) {
                                                             val vUncond = sVe.run(
                                                                 mapOf(
                                                                     "x" to xTensor,
@@ -651,7 +652,7 @@ class VieNeuEngine(private val context: Context) {
 
                                                             for (idx in 0 until latentSize) {
                                                                 val vu = vUncond[idx]
-                                                                val guidedV = vu + cfgScale * (vCond[idx] - vu)
+                                                                val guidedV = vu + CFG_SCALE * (vCond[idx] - vu)
                                                                 x[idx] += dt * guidedV
                                                             }
                                                         } else {
