@@ -17,6 +17,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -48,6 +49,9 @@ class TtsManager(
 
     private val _sentences = MutableStateFlow<List<String>>(emptyList())
     val sentences: StateFlow<List<String>> = _sentences.asStateFlow()
+
+    private val _bookTitle = MutableStateFlow("")
+    val bookTitle: StateFlow<String> = _bookTitle.asStateFlow()
 
     private val _availableEngines = MutableStateFlow<List<EngineInfo>>(emptyList())
     val availableEngines: StateFlow<List<EngineInfo>> = _availableEngines.asStateFlow()
@@ -165,16 +169,23 @@ class TtsManager(
 
         if (currentIdx + 1 < list.size) {
             val nextIdx = currentIdx + 1
-            _currentIndex.value = nextIdx
-            speakSentence(nextIdx)
+            val pauseMs = (_settings.value.sentencePauseMs / _settings.value.speechRate.coerceIn(0.6f, 1.6f)).toLong().coerceIn(150L, 1500L)
+            scope.launch {
+                delay(pauseMs)
+                if (_playbackStatus.value == PlaybackStatus.PLAYING) {
+                    _currentIndex.value = nextIdx
+                    speakSentence(nextIdx)
+                }
+            }
         } else {
             _playbackStatus.value = PlaybackStatus.COMPLETED
         }
     }
 
-    fun setSentences(newSentences: List<String>, startIndex: Int = 0) {
+    fun setSentences(newSentences: List<String>, startIndex: Int = 0, title: String = "") {
         stop()
         vieneuPreBufferQueue.clearCache()
+        _bookTitle.value = title
         _sentences.value = newSentences
         _currentIndex.value = startIndex.coerceIn(0, (newSentences.size - 1).coerceAtLeast(0))
 
@@ -375,7 +386,9 @@ class TtsManager(
         val engineTypeChanged = oldSettings.engineType != newSettings.engineType
         val audioParamsChanged = oldSettings.selectedVieNeuVoice != newSettings.selectedVieNeuVoice ||
                 oldSettings.speechRate != newSettings.speechRate ||
-                oldSettings.pitch != newSettings.pitch
+                oldSettings.pitch != newSettings.pitch ||
+                oldSettings.sentencePauseMs != newSettings.sentencePauseMs ||
+                oldSettings.clausePauseMs != newSettings.clausePauseMs
 
         if (engineTypeChanged) {
             vieneuSynthesisJob?.cancel()

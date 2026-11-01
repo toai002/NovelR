@@ -1,14 +1,18 @@
 package com.novelr.reader
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -45,6 +49,9 @@ class MainActivity : ComponentActivity() {
                 serviceBinder = ttsService
                 isServiceBound = true
                 viewModel.attachService(ttsService)
+                if (ttsService.ttsManager.sentences.value.isNotEmpty()) {
+                    currentScreen = CurrentScreen.READER
+                }
             }
         }
 
@@ -86,7 +93,15 @@ class MainActivity : ComponentActivity() {
                         CurrentScreen.PASTE -> {
                             PasteScreen(
                                 rawText = uiState.rawText,
+                                bookTitle = uiState.bookTitle,
                                 onTextChanged = viewModel::onTextChanged,
+                                onPickTxtFile = { uri ->
+                                    viewModel.loadTxtFile(
+                                        context = this@MainActivity,
+                                        uri = uri,
+                                        autoStartReading = false
+                                    )
+                                },
                                 onStartReading = {
                                     viewModel.startReading(
                                         onReady = { currentScreen = CurrentScreen.READER }
@@ -101,6 +116,14 @@ class MainActivity : ComponentActivity() {
                             ReaderScreen(
                                 uiState = uiState,
                                 onBack = { currentScreen = CurrentScreen.PASTE },
+                                onPickTxtFile = { uri ->
+                                    viewModel.loadTxtFile(
+                                        context = this@MainActivity,
+                                        uri = uri,
+                                        autoStartReading = true,
+                                        onReady = { currentScreen = CurrentScreen.READER }
+                                    )
+                                },
                                 onTogglePlayPause = viewModel::togglePlayPause,
                                 onNextSentence = viewModel::nextSentence,
                                 onPreviousSentence = viewModel::previousSentence,
@@ -109,6 +132,9 @@ class MainActivity : ComponentActivity() {
                                 onDecreaseFontSize = viewModel::decreaseFontSize,
                                 onSpeechRateChange = viewModel::updateSpeechRate,
                                 onPitchChange = viewModel::updatePitch,
+                                onSentencePauseChange = viewModel::updateSentencePause,
+                                onBackgroundPlaybackChange = viewModel::updateBackgroundPlayback,
+                                onRequestIgnoreBatteryOptimizations = ::requestIgnoreBatteryOptimizations,
                                 onEngineSelected = viewModel::selectEngine,
                                 onEngineTypeSelected = viewModel::selectEngineType,
                                 onVieNeuVoiceSelected = viewModel::selectVieNeuVoice,
@@ -120,6 +146,28 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    @SuppressLint("BatteryLife")
+    private fun requestIgnoreBatteryOptimizations() {
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+            } else {
+                val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                startActivity(intent)
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        serviceBinder?.onAppBackgrounded()
     }
 
     override fun onDestroy() {

@@ -1,5 +1,7 @@
 package com.novelr.reader.ui.viewmodel
 
+import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.novelr.reader.model.PlaybackStatus
@@ -8,6 +10,7 @@ import com.novelr.reader.model.TtsEngineType
 import com.novelr.reader.service.TtsAudioService
 import com.novelr.reader.service.TtsManager
 import com.novelr.reader.util.TextSplitter
+import com.novelr.reader.util.TxtFileLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -54,15 +57,17 @@ class ReaderViewModel : ViewModel() {
             }
         }.launchIn(viewModelScope)
 
-        // Nhóm 2: Trạng thái khởi tạo & thông báo lỗi
+        // Nhóm 2: Trạng thái khởi tạo, thông báo lỗi & tiêu đề sách/file .txt
         observerJobs += combine(
             manager.isInitialized,
-            manager.errorMessage
-        ) { initialized, error ->
+            manager.errorMessage,
+            manager.bookTitle
+        ) { initialized, error, title ->
             _uiState.update { current ->
                 current.copy(
                     isTtsInitialized = initialized,
-                    errorMessage = error
+                    errorMessage = error,
+                    bookTitle = if (title.isNotBlank()) title else current.bookTitle
                 )
             }
         }.launchIn(viewModelScope)
@@ -86,23 +91,61 @@ class ReaderViewModel : ViewModel() {
     }
 
     fun onTextChanged(newText: String) {
-        _uiState.update { it.copy(rawText = newText) }
+        _uiState.update {
+            it.copy(
+                rawText = newText,
+                bookTitle = if (newText.isBlank()) "" else it.bookTitle
+            )
+        }
+    }
+
+    /**
+     * Nạp nội dung từ file .txt trong bộ nhớ điện thoại (hỗ trợ UTF-8, UTF-16, Windows-1258).
+     */
+    fun loadTxtFile(
+        context: Context,
+        uri: Uri,
+        autoStartReading: Boolean = false,
+        onReady: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                TxtFileLoader.loadFromUri(context, uri)
+            }
+            result.onSuccess { doc ->
+                _uiState.update {
+                    it.copy(
+                        rawText = doc.content,
+                        bookTitle = doc.fileName,
+                        errorMessage = null
+                    )
+                }
+                if (autoStartReading && doc.content.isNotBlank()) {
+                    startReading(onReady = onReady)
+                }
+            }.onFailure { err ->
+                _uiState.update {
+                    it.copy(errorMessage = "Không thể đọc file .txt: ${err.message}")
+                }
+            }
+        }
     }
 
     /**
      * Tách câu bất đồng bộ trên Dispatchers.Default để tránh giật lag (ANR) trên Main Thread
-     * khi người dùng dán chương truyện dài hàng chục nghìn từ.
+     * khi người dùng dán chương truyện hoặc mở file .txt dài hàng chục nghìn từ.
      */
     fun startReading(onReady: () -> Unit = {}) {
         val raw = _uiState.value.rawText
         if (raw.isBlank()) return
+        val title = _uiState.value.bookTitle.ifBlank { "Văn bản đang đọc" }
 
         viewModelScope.launch {
             val sentences = withContext(Dispatchers.Default) {
                 TextSplitter.splitIntoSentences(raw)
             }
             if (sentences.isNotEmpty()) {
-                ttsManager?.setSentences(sentences, startIndex = 0)
+                ttsManager?.setSentences(sentences, startIndex = 0, title = title)
                 ttsManager?.play()
                 onReady()
             }
@@ -145,6 +188,16 @@ class ReaderViewModel : ViewModel() {
 
     fun updatePitch(pitch: Float) {
         val newSettings = _uiState.value.settings.copy(pitch = pitch)
+        ttsManager?.updateSettings(newSettings)
+    }
+
+    fun updateSentencePause(pauseMs: Int) {
+        val newSettings = _uiState.value.settings.copy(sentencePauseMs = pauseMs.coerceIn(200, 1200))
+        ttsManager?.updateSettings(newSettings)
+    }
+
+    fun updateBackgroundPlayback(enabled: Boolean) {
+        val newSettings = _uiState.value.settings.copy(backgroundPlayback = enabled)
         ttsManager?.updateSettings(newSettings)
     }
 

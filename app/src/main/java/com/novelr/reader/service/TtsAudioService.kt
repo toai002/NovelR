@@ -14,11 +14,15 @@ import android.media.AudioManager
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
+import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.novelr.reader.MainActivity
 import com.novelr.reader.model.PlaybackStatus
+import com.novelr.reader.model.TtsEngineType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -29,8 +33,10 @@ import kotlinx.coroutines.flow.onEach
 class TtsAudioService : Service() {
 
     companion object {
+        private const val TAG = "TtsAudioService"
         const val CHANNEL_ID = "novelr_tts_playback_channel"
         const val NOTIFICATION_ID = 1001
+        private const val WAKELOCK_TAG = "novelr:TtsPlaybackWakeLock"
 
         const val ACTION_PLAY = "com.novelr.reader.ACTION_PLAY"
         const val ACTION_PAUSE = "com.novelr.reader.ACTION_PAUSE"
@@ -47,6 +53,7 @@ class TtsAudioService : Service() {
 
     private lateinit var mediaSession: MediaSessionCompat
     private lateinit var audioManager: AudioManager
+    private var wakeLock: PowerManager.WakeLock? = null
     private var audioFocusRequest: AudioFocusRequest? = null
     private var isForegroundActive = false
     private var resumeOnFocusGain = false
@@ -82,6 +89,14 @@ class TtsAudioService : Service() {
         ttsManager = TtsManager(applicationContext, serviceScope)
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            WAKELOCK_TAG
+        ).apply {
+            setReferenceCounted(false)
+        }
+
         createNotificationChannel()
         initMediaSession()
         observePlaybackState()
@@ -101,11 +116,53 @@ class TtsAudioService : Service() {
             ACTION_STOP -> {
                 resumeOnFocusGain = false
                 ttsManager.stop()
+                releaseWakeLock()
                 stopForegroundServiceCleanly(removeNotification = true)
                 stopSelf()
             }
         }
-        return START_NOT_STICKY
+        return START_STICKY
+    }
+
+    /**
+     * Được gọi từ MainActivity.onStop() khi người dùng tắt màn hình hoặc thoát ra màn hình chính.
+     * Nếu bật Chế độ chạy nền (backgroundPlayback = true), giữ Foreground Service + WakeLock để đọc liên tục.
+     * Nếu tắt Chế độ chạy nền, tự động tạm dừng đọc.
+     */
+    fun onAppBackgrounded() {
+        if (!ttsManager.settings.value.backgroundPlayback &&
+            ttsManager.playbackStatus.value == PlaybackStatus.PLAYING
+        ) {
+            ttsManager.pause()
+        } else if (ttsManager.playbackStatus.value == PlaybackStatus.PLAYING) {
+            acquireWakeLock()
+            startForegroundServiceWithNotification()
+        }
+    }
+
+    private fun acquireWakeLock() {
+        try {
+            val wl = wakeLock ?: return
+            if (!wl.isHeld) {
+                // Giữ CPU hoạt động tối đa 6 giờ liên tục khi tắt màn hình đọc sách
+                wl.acquire(6 * 60 * 60 * 1000L)
+                Log.d(TAG, "Đã bật CPU WakeLock cho chế độ đọc chạy nền")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Không thể bật WakeLock: ${e.message}")
+        }
+    }
+
+    private fun releaseWakeLock() {
+        try {
+            val wl = wakeLock ?: return
+            if (wl.isHeld) {
+                wl.release()
+                Log.d(TAG, "Đã giải phóng CPU WakeLock")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Không thể giải phóng WakeLock: ${e.message}")
+        }
     }
 
     private fun initMediaSession() {
@@ -134,6 +191,7 @@ class TtsAudioService : Service() {
                     resumeOnFocusGain = false
                     abandonAudioFocus()
                     ttsManager.stop()
+                    releaseWakeLock()
                     stopForegroundServiceCleanly(removeNotification = true)
                     stopSelf()
                 }
@@ -145,17 +203,21 @@ class TtsAudioService : Service() {
     private fun observePlaybackState() {
         ttsManager.playbackStatus.onEach { status ->
             updateMediaSessionState(status)
+            updateMediaSessionMetadata()
             when (status) {
                 PlaybackStatus.PLAYING -> {
                     requestAudioFocus()
+                    acquireWakeLock()
                     startForegroundServiceWithNotification()
                 }
                 PlaybackStatus.PAUSED -> {
+                    releaseWakeLock()
                     if (isForegroundActive) {
                         updateNotification()
                     }
                 }
                 PlaybackStatus.COMPLETED -> {
+                    releaseWakeLock()
                     abandonAudioFocus()
                     if (isForegroundActive) {
                         stopForegroundServiceCleanly(removeNotification = false)
@@ -163,6 +225,7 @@ class TtsAudioService : Service() {
                     }
                 }
                 PlaybackStatus.IDLE -> {
+                    releaseWakeLock()
                     abandonAudioFocus()
                     if (isForegroundActive) {
                         stopForegroundServiceCleanly(removeNotification = true)
@@ -172,6 +235,7 @@ class TtsAudioService : Service() {
         }.launchIn(serviceScope)
 
         ttsManager.currentIndex.onEach {
+            updateMediaSessionMetadata()
             if (isForegroundActive && (
                 ttsManager.playbackStatus.value == PlaybackStatus.PLAYING ||
                 ttsManager.playbackStatus.value == PlaybackStatus.PAUSED
@@ -179,6 +243,29 @@ class TtsAudioService : Service() {
                 updateNotification()
             }
         }.launchIn(serviceScope)
+    }
+
+    private fun updateMediaSessionMetadata() {
+        val currentIndex = ttsManager.currentIndex.value
+        val total = ttsManager.sentences.value.size
+        val displayIndex = if (total > 0) (currentIndex + 1).coerceAtMost(total) else 0
+        val currentSentence = ttsManager.sentences.value.getOrNull(currentIndex) ?: "NovelR - Đọc Sách TTS"
+        val rawTitle = ttsManager.bookTitle.value.ifBlank { "NovelR AudioBook" }
+        val engineLabel = if (ttsManager.settings.value.engineType == TtsEngineType.VIENEU_ON_DEVICE) {
+            "VieNeu AI • Câu $displayIndex/$total"
+        } else {
+            "Hệ thống • Câu $displayIndex/$total"
+        }
+
+        val metadata = MediaMetadataCompat.Builder()
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentSentence)
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, "$rawTitle ($engineLabel)")
+            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, rawTitle)
+            .putLong(MediaMetadataCompat.METADATA_KEY_TRACK_NUMBER, displayIndex.toLong())
+            .putLong(MediaMetadataCompat.METADATA_KEY_NUM_TRACKS, total.toLong())
+            .build()
+
+        mediaSession.setMetadata(metadata)
     }
 
     private fun startForegroundServiceWithNotification() {
@@ -214,12 +301,13 @@ class TtsAudioService : Service() {
         val total = ttsManager.sentences.value.size
         val displayIndex = if (total > 0) (currentIndex + 1).coerceAtMost(total) else 0
         val currentSentence = ttsManager.sentences.value.getOrNull(currentIndex) ?: "Đang đọc sách..."
+        val titlePrefix = ttsManager.bookTitle.value.ifBlank { "NovelR" }
 
         val contentIntent = PendingIntent.getActivity(
             this,
             0,
             Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -244,6 +332,12 @@ class TtsAudioService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val stopIntent = PendingIntent.getService(
+            this, 4,
+            Intent(this, TtsAudioService::class.java).apply { action = ACTION_STOP },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val playPauseIcon = if (isPlaying) {
             android.R.drawable.ic_media_pause
         } else {
@@ -251,7 +345,7 @@ class TtsAudioService : Service() {
         }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("NovelR Book Reader ($displayIndex / $total)")
+            .setContentTitle("$titlePrefix ($displayIndex / $total)")
             .setContentText(currentSentence)
             .setSmallIcon(android.R.drawable.ic_lock_silent_mode_off)
             .setContentIntent(contentIntent)
@@ -260,6 +354,7 @@ class TtsAudioService : Service() {
             .addAction(android.R.drawable.ic_media_previous, "Câu trước", prevIntent)
             .addAction(playPauseIcon, if (isPlaying) "Tạm dừng" else "Đọc tiếp", playPauseIntent)
             .addAction(android.R.drawable.ic_media_next, "Câu sau", nextIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Dừng", stopIntent)
             .setStyle(
                 androidx.media.app.NotificationCompat.MediaStyle()
                     .setMediaSession(mediaSession.sessionToken)
@@ -329,7 +424,7 @@ class TtsAudioService : Service() {
                 "Book Reader Audio Playback",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Shows active sentence and controls for TTS playback."
+                description = "Hiển thị câu đang đọc và nút điều khiển trên màn hình khóa."
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
@@ -338,6 +433,7 @@ class TtsAudioService : Service() {
     }
 
     override fun onDestroy() {
+        releaseWakeLock()
         abandonAudioFocus()
         mediaSession.release()
         ttsManager.release()

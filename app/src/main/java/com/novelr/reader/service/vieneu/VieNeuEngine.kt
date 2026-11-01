@@ -449,6 +449,8 @@ class VieNeuEngine(private val context: Context) {
         voiceId: String,
         speed: Float,
         pitch: Float,
+        sentencePauseMs: Int = 550,
+        clausePauseMs: Int = 240,
         onClauseReady: (ShortArray) -> Unit
     ): ShortArray = withContext(Dispatchers.Default) {
         if (text.isBlank()) return@withContext ShortArray(0)
@@ -470,11 +472,28 @@ class VieNeuEngine(private val context: Context) {
         val clauses = splitIntoStreamingClauses(text)
         val generatedChunks = ArrayList<ShortArray>(clauses.size)
         var totalSamples = 0
+        val speedFactor = speed.coerceIn(0.65f, 1.6f)
 
-        for (clause in clauses) {
+        for ((idx, clause) in clauses.withIndex()) {
             if (!coroutineContext.isActive) break
+            val isLastClause = (idx == clauses.lastIndex)
+
+            // Tính khoảng nghỉ tự nhiên sau mỗi mệnh đề hoặc cuối câu
+            val basePauseMs = if (isLastClause) {
+                val trimmed = clause.trimEnd()
+                val multiplier = when {
+                    trimmed.endsWith("?") || trimmed.endsWith("!") || trimmed.endsWith("…") || trimmed.endsWith("...") -> 1.25f
+                    else -> 1.0f
+                }
+                (sentencePauseMs * multiplier / speedFactor).roundToInt().coerceIn(180, 1500)
+            } else {
+                val trimmed = clause.trimEnd()
+                val multiplier = if (trimmed.endsWith(";") || trimmed.endsWith(":") || trimmed.endsWith("—") || trimmed.endsWith("–")) 1.25f else 1.0f
+                (clausePauseMs * multiplier / speedFactor).roundToInt().coerceIn(120, 600)
+            }
+
             val chunkPcm = try {
-                runOnnxInference(clause, voiceId, speed)
+                runOnnxInference(clause, voiceId, speed, trailingPauseMs = basePauseMs)
             } catch (e: Exception) {
                 Log.e(TAG, "Lỗi suy luận ONNX mệnh đề '$clause': ${e.message}", e)
                 ShortArray(0)
@@ -506,12 +525,16 @@ class VieNeuEngine(private val context: Context) {
         text: String,
         voiceId: String,
         speed: Float,
-        pitch: Float
+        pitch: Float,
+        sentencePauseMs: Int = 550,
+        clausePauseMs: Int = 240
     ): ShortArray = synthesizeStreaming(
         text = text,
         voiceId = voiceId,
         speed = speed,
         pitch = pitch,
+        sentencePauseMs = sentencePauseMs,
+        clausePauseMs = clausePauseMs,
         onClauseReady = {}
     )
 
@@ -522,7 +545,8 @@ class VieNeuEngine(private val context: Context) {
     private fun runOnnxInference(
         text: String,
         voiceId: String,
-        speed: Float
+        speed: Float,
+        trailingPauseMs: Int = 450
     ): ShortArray {
         val env = ortEnv ?: return ShortArray(0)
         val sText = textEncoderSession ?: return ShortArray(0)
@@ -654,7 +678,7 @@ class VieNeuEngine(private val context: Context) {
                                 }
                             }
 
-                            return postProcessWaveform(rawWav)
+                            return postProcessWaveform(rawWav, trailingPauseMs)
                         }
                     }
                 }
@@ -670,12 +694,13 @@ class VieNeuEngine(private val context: Context) {
     }
 
     /**
-     * Cắt khoảng lặng thừa đầu/cuối và làm mượt biên độ (Fade-in 15ms / Fade-out 25ms).
+     * Làm mượt biên độ đầu/cuối bằng đường cong Raised-Cosine (Hann Fade-in 28ms / Fade-out 55ms)
+     * và chèn khoảng nghỉ lấy hơi tự nhiên [trailingPauseMs] để chuyển câu êm ái như người thật đọc.
      */
-    private fun postProcessWaveform(wav: FloatArray): ShortArray {
+    private fun postProcessWaveform(wav: FloatArray, trailingPauseMs: Int): ShortArray {
         if (wav.isEmpty()) return ShortArray(0)
         val sr = VieNeuConstants.SAMPLE_RATE
-        val threshold = 0.006f
+        val threshold = 0.005f
 
         var firstActive = -1
         var lastActive = -1
@@ -689,31 +714,39 @@ class VieNeuEngine(private val context: Context) {
         val startIdx: Int
         val endIdx: Int
         if (firstActive != -1 && lastActive >= firstActive) {
-            startIdx = (firstActive - (0.04f * sr).toInt()).coerceAtLeast(0)
-            endIdx = (lastActive + (0.06f * sr).toInt()).coerceAtMost(wav.size)
+            startIdx = (firstActive - (0.065f * sr).toInt()).coerceAtLeast(0)
+            endIdx = (lastActive + (0.095f * sr).toInt()).coerceAtMost(wav.size)
         } else {
             startIdx = 0
             endIdx = wav.size
         }
 
-        val length = (endIdx - startIdx).coerceAtLeast(0)
-        if (length == 0) return ShortArray(0)
+        val voiceLength = (endIdx - startIdx).coerceAtLeast(0)
+        if (voiceLength == 0) return ShortArray(0)
 
-        val fadeInSamples = (0.015f * sr).toInt().coerceAtMost(length)
-        val fadeOutSamples = (0.025f * sr).toInt().coerceAtMost(length)
+        val fadeInSamples = (0.028f * sr).toInt().coerceAtMost(voiceLength)
+        val fadeOutSamples = (0.055f * sr).toInt().coerceAtMost(voiceLength)
+        val pauseSamples = ((trailingPauseMs / 1000f) * sr).toInt().coerceAtLeast(0)
 
-        val pcm = ShortArray(length)
-        for (i in 0 until length) {
+        // Thêm 20ms đệm êm ở đầu câu để không bị gắt âm đầu
+        val leadInSamples = (0.020f * sr).toInt()
+        val totalLength = leadInSamples + voiceLength + pauseSamples
+        val pcm = ShortArray(totalLength)
+
+        for (i in 0 until voiceLength) {
             var sample = wav[startIdx + i]
             if (i < fadeInSamples && fadeInSamples > 0) {
-                sample *= (i.toFloat() / fadeInSamples.toFloat())
+                val ratio = i.toDouble() / fadeInSamples.toDouble()
+                val gain = (0.5 * (1.0 - cos(PI * ratio))).toFloat()
+                sample *= gain
             }
-            if (i >= length - fadeOutSamples && fadeOutSamples > 0) {
-                val remain = length - 1 - i
-                sample *= (remain.toFloat() / fadeOutSamples.toFloat())
+            if (i >= voiceLength - fadeOutSamples && fadeOutSamples > 0) {
+                val remain = (voiceLength - 1 - i).toDouble() / fadeOutSamples.toDouble()
+                val gain = (0.5 * (1.0 - cos(PI * remain))).toFloat()
+                sample *= gain
             }
             val shortVal = (sample * 32767f).toInt().coerceIn(-32768, 32767)
-            pcm[i] = shortVal.toShort()
+            pcm[leadInSamples + i] = shortVal.toShort()
         }
         return pcm
     }

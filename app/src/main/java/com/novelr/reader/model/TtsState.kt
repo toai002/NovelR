@@ -13,7 +13,7 @@ enum class TtsEngineType {
 }
 
 enum class VieNeuModelStatus {
-    NOT_DOWNLOADED,     // Chưa tải model về máy (~268 MB trên HuggingFace)
+    NOT_DOWNLOADED,     // Chưa tải model về máy (~256 MB trên HuggingFace)
     DOWNLOADING,        // Đang tải weights ONNX
     READY,              // Đã sẵn sàng chạy offline
     ERROR               // Lỗi nạp hoặc tải model
@@ -37,11 +37,15 @@ data class TtsSettings(
     val enginePackage: String? = null,
     val engineType: TtsEngineType = TtsEngineType.NATIVE_SYSTEM,
     val selectedVieNeuVoice: String = "duc_tri",
-    val lookaheadBufferSize: Int = 2 // Số câu tổng hợp trước vào RAM
+    val lookaheadBufferSize: Int = 2,   // Số câu tổng hợp trước vào RAM
+    val sentencePauseMs: Int = 550,     // Khoảng nghỉ tự nhiên khi chuyển câu (ms)
+    val clausePauseMs: Int = 240,       // Khoảng nghỉ lấy hơi giữa các mệnh đề dấu phẩy (ms)
+    val backgroundPlayback: Boolean = true // Tiếp tục đọc chạy nền khi tắt màn hình / ẩn ứng dụng
 )
 
 data class ReaderUiState(
     val rawText: String = "",
+    val bookTitle: String = "",
     val sentences: List<String> = emptyList(),
     val currentIndex: Int = 0,
     val playbackStatus: PlaybackStatus = PlaybackStatus.IDLE,

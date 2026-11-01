@@ -1,5 +1,8 @@
 package com.novelr.reader.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -22,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Pause
@@ -55,6 +59,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.novelr.reader.model.PlaybackStatus
@@ -67,6 +72,7 @@ import com.novelr.reader.model.VieNeuModelStatus
 fun ReaderScreen(
     uiState: ReaderUiState,
     onBack: () -> Unit,
+    onPickTxtFile: (Uri) -> Unit,
     onTogglePlayPause: () -> Unit,
     onNextSentence: () -> Unit,
     onPreviousSentence: () -> Unit,
@@ -75,6 +81,9 @@ fun ReaderScreen(
     onDecreaseFontSize: () -> Unit,
     onSpeechRateChange: (Float) -> Unit,
     onPitchChange: (Float) -> Unit,
+    onSentencePauseChange: (Int) -> Unit,
+    onBackgroundPlaybackChange: (Boolean) -> Unit,
+    onRequestIgnoreBatteryOptimizations: () -> Unit,
     onEngineSelected: (String) -> Unit,
     onEngineTypeSelected: (TtsEngineType) -> Unit,
     onVieNeuVoiceSelected: (String) -> Unit,
@@ -83,6 +92,14 @@ fun ReaderScreen(
 ) {
     val listState = rememberLazyListState()
     var showSettingsSheet by remember { mutableStateOf(false) }
+
+    val txtPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            onPickTxtFile(uri)
+        }
+    }
 
     LaunchedEffect(uiState.currentIndex) {
         if (uiState.sentences.isNotEmpty() && uiState.currentIndex in uiState.sentences.indices) {
@@ -98,9 +115,16 @@ fun ReaderScreen(
             TopAppBar(
                 title = {
                     Column {
+                        val headerTitle = if (uiState.bookTitle.isNotBlank()) {
+                            uiState.bookTitle
+                        } else {
+                            "Đang đọc (${uiState.currentIndex + 1}/${uiState.sentences.size.coerceAtLeast(1)})"
+                        }
                         Text(
-                            text = "Đang đọc (${uiState.currentIndex + 1}/${uiState.sentences.size.coerceAtLeast(1)})",
-                            style = MaterialTheme.typography.titleMedium
+                            text = headerTitle,
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (uiState.settings.engineType == TtsEngineType.VIENEU_ON_DEVICE) {
@@ -111,13 +135,21 @@ fun ReaderScreen(
                                     tint = MaterialTheme.colorScheme.primary
                                 )
                                 Text(
-                                    text = " VieNeu-TTS AI (On-Device)",
+                                    text = if (uiState.settings.backgroundPlayback) {
+                                        " VieNeu AI • Chạy nền BẬT"
+                                    } else {
+                                        " VieNeu AI (On-Device)"
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary
                                 )
                             } else {
                                 Text(
-                                    text = "Hệ thống TTS",
+                                    text = if (uiState.settings.backgroundPlayback) {
+                                        "Hệ thống TTS • Chạy nền BẬT"
+                                    } else {
+                                        "Hệ thống TTS"
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.outline
                                 )
@@ -131,6 +163,11 @@ fun ReaderScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = { txtPickerLauncher.launch(arrayOf("text/plain", "text/*")) }
+                    ) {
+                        Icon(Icons.Default.FolderOpen, contentDescription = "Mở file .TXT khác")
+                    }
                     IconButton(onClick = onDecreaseFontSize) {
                         Text("A-", fontWeight = FontWeight.Bold)
                     }
@@ -203,6 +240,9 @@ fun ReaderScreen(
             downloadProgress = uiState.vieneuDownloadProgress,
             onSpeechRateChange = onSpeechRateChange,
             onPitchChange = onPitchChange,
+            onSentencePauseChange = onSentencePauseChange,
+            onBackgroundPlaybackChange = onBackgroundPlaybackChange,
+            onRequestIgnoreBatteryOptimizations = onRequestIgnoreBatteryOptimizations,
             onEngineSelected = onEngineSelected,
             onEngineTypeSelected = onEngineTypeSelected,
             onVieNeuVoiceSelected = onVieNeuVoiceSelected,
@@ -268,7 +308,6 @@ fun SentenceItemCard(
                     color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
                 )
 
-                // Huy hiệu thể hiện câu đã được Render trước vào RAM
                 if (isPrebuffered && !isCurrent) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Box(

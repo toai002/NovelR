@@ -10,11 +10,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Psychology
@@ -25,6 +27,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -35,6 +38,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -63,6 +67,9 @@ fun SettingsSheet(
     downloadProgress: Float,
     onSpeechRateChange: (Float) -> Unit,
     onPitchChange: (Float) -> Unit,
+    onSentencePauseChange: (Int) -> Unit,
+    onBackgroundPlaybackChange: (Boolean) -> Unit,
+    onRequestIgnoreBatteryOptimizations: () -> Unit,
     onEngineSelected: (String) -> Unit,
     onEngineTypeSelected: (TtsEngineType) -> Unit,
     onVieNeuVoiceSelected: (String) -> Unit,
@@ -79,15 +86,67 @@ fun SettingsSheet(
                 .padding(horizontal = 24.dp)
                 .padding(bottom = 36.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(22.dp)
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
             Text(
-                text = "Cài Đặt Giọng Đọc Sách",
+                text = "Cài Đặt Giọng Đọc & Chạy Nền",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
 
-            // 1. CHỌN LOẠI CÔNG CỤ (SYSTEM TTS VS VIENEU AI ON-DEVICE)
+            // 1. CHẾ ĐỘ CHẠY NỀN KHI TẮT MÀN HÌNH
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Đọc chạy nền khi tắt màn hình",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Giữ CPU WakeLock & điều khiển qua màn hình khóa khi khóa máy hoặc thoát ra ngoài.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Switch(
+                            checked = settings.backgroundPlayback,
+                            onCheckedChange = onBackgroundPlaybackChange
+                        )
+                    }
+
+                    if (settings.backgroundPlayback) {
+                        FilledTonalButton(
+                            onClick = onRequestIgnoreBatteryOptimizations,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                Icons.Default.BatteryChargingFull,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Mở giới hạn Pin chạy nền (Xiaomi HyperOS)")
+                        }
+                    }
+                }
+            }
+
+            // 2. CHỌN LOẠI CÔNG CỤ (SYSTEM TTS VS VIENEU AI ON-DEVICE)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = "Công nghệ giọng đọc",
@@ -116,9 +175,8 @@ fun SettingsSheet(
                 }
             }
 
-            // 2. NỘI DUNG CẤU HÌNH RIÊNG THEO ENGINE
+            // 3. NỘI DUNG CẤU HÌNH RIÊNG THEO ENGINE
             if (settings.engineType == TtsEngineType.VIENEU_ON_DEVICE) {
-                // Thẻ trạng thái Model VieNeu
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
@@ -132,7 +190,7 @@ fun SettingsSheet(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Mô hình: VieNeu-TTS v3 Nano (ONNX int8)",
+                                text = "Mô hình: VieNeu-TTS v3 Nano (ONNX)",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -295,7 +353,7 @@ fun SettingsSheet(
                         )
                     }
                     Text(
-                        text = "Render ngầm trước các câu sau để chuyển câu tức thì không có độ trễ.",
+                        text = "Render ngầm trước các câu sau để chuyển câu mượt mà không phải chờ.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.outline
                     )
@@ -353,7 +411,34 @@ fun SettingsSheet(
                 }
             }
 
-            // 3. TỐC ĐỘ ĐỌC (SPEECH RATE)
+            // 4. KHOẢNG NGHỈ CHUYỂN CÂU TỰ NHIÊN (SENTENCE PAUSE)
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(text = "Khoảng nghỉ chuyển câu", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        text = String.format(Locale.US, "%.2f giây (%d ms)", settings.sentencePauseMs / 1000f, settings.sentencePauseMs),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Text(
+                    text = "Nhịp nghỉ lấy hơi tự nhiên giữa các câu để giọng đọc không bị gấp gáp.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline
+                )
+                Slider(
+                    value = settings.sentencePauseMs.toFloat(),
+                    onValueChange = { onSentencePauseChange((it / 50f).toInt() * 50) },
+                    valueRange = 200f..1200f,
+                    steps = 19
+                )
+            }
+
+            // 5. TỐC ĐỘ ĐỌC (SPEECH RATE)
             Column {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -375,7 +460,7 @@ fun SettingsSheet(
                 )
             }
 
-            // 4. CAO ĐỘ GIỌNG (PITCH)
+            // 6. CAO ĐỘ GIỌNG (PITCH)
             Column {
                 Row(
                     modifier = Modifier.fillMaxWidth(),

@@ -93,6 +93,8 @@ class VieNeuPreBufferQueue(
                         voiceId = settings.selectedVieNeuVoice,
                         speed = settings.speechRate,
                         pitch = settings.pitch,
+                        sentencePauseMs = settings.sentencePauseMs,
+                        clausePauseMs = settings.clausePauseMs,
                         onClauseReady = onClauseReady
                     )
                     if (synthesized.isNotEmpty()) {
@@ -150,7 +152,9 @@ class VieNeuPreBufferQueue(
                             text = sentence,
                             voiceId = settings.selectedVieNeuVoice,
                             speed = settings.speechRate,
-                            pitch = settings.pitch
+                            pitch = settings.pitch,
+                            sentencePauseMs = settings.sentencePauseMs,
+                            clausePauseMs = settings.clausePauseMs
                         )
                     }
                     if (isActive && pcm.isNotEmpty()) {
