@@ -10,11 +10,13 @@ object ReaderPreferences {
 
     private const val KEY_ENGINE_TYPE = "engine_type"
     private const val KEY_VIENEU_VOICE = "vieneu_voice"
+    private const val KEY_SYSTEM_VOICE = "system_voice"
     private const val KEY_SPEECH_RATE = "speech_rate"
     private const val KEY_PITCH = "pitch"
     private const val KEY_SENTENCE_PAUSE = "sentence_pause_ms"
     private const val KEY_CLAUSE_PAUSE = "clause_pause_ms"
     private const val KEY_LOOKAHEAD = "lookahead_buffer"
+    private const val KEY_WARM_FILTER = "warm_voice_filter"
     private const val KEY_BG_PLAYBACK = "background_playback"
     private const val KEY_ENGINE_PKG = "engine_package"
     private const val KEY_FONT_SIZE = "font_size_sp"
@@ -33,12 +35,14 @@ object ReaderPreferences {
             speechRate = prefs.getFloat(KEY_SPEECH_RATE, TtsSettings.DEFAULT_SPEECH_RATE).coerceIn(0.5f, 2.0f),
             pitch = prefs.getFloat(KEY_PITCH, TtsSettings.DEFAULT_PITCH).coerceIn(0.5f, 1.5f),
             enginePackage = prefs.getString(KEY_ENGINE_PKG, null),
+            selectedSystemVoice = prefs.getString(KEY_SYSTEM_VOICE, null),
             engineType = engineType,
             selectedVieNeuVoice = prefs.getString(KEY_VIENEU_VOICE, TtsSettings.DEFAULT_VIENEU_VOICE)
                 ?: TtsSettings.DEFAULT_VIENEU_VOICE,
             lookaheadBufferSize = prefs.getInt(KEY_LOOKAHEAD, TtsSettings.DEFAULT_LOOKAHEAD).coerceIn(1, 4),
             sentencePauseMs = prefs.getInt(KEY_SENTENCE_PAUSE, TtsSettings.DEFAULT_SENTENCE_PAUSE_MS).coerceIn(200, 1200),
             clausePauseMs = prefs.getInt(KEY_CLAUSE_PAUSE, TtsSettings.DEFAULT_CLAUSE_PAUSE_MS).coerceIn(120, 600),
+            warmVoiceFilter = prefs.getBoolean(KEY_WARM_FILTER, TtsSettings.DEFAULT_WARM_VOICE_FILTER),
             backgroundPlayback = prefs.getBoolean(KEY_BG_PLAYBACK, true)
         )
     }
@@ -48,11 +52,13 @@ object ReaderPreferences {
         prefs.edit()
             .putString(KEY_ENGINE_TYPE, settings.engineType.name)
             .putString(KEY_VIENEU_VOICE, settings.selectedVieNeuVoice)
+            .putString(KEY_SYSTEM_VOICE, settings.selectedSystemVoice)
             .putFloat(KEY_SPEECH_RATE, settings.speechRate)
             .putFloat(KEY_PITCH, settings.pitch)
             .putInt(KEY_SENTENCE_PAUSE, settings.sentencePauseMs)
             .putInt(KEY_CLAUSE_PAUSE, settings.clausePauseMs)
             .putInt(KEY_LOOKAHEAD, settings.lookaheadBufferSize)
+            .putBoolean(KEY_WARM_FILTER, settings.warmVoiceFilter)
             .putBoolean(KEY_BG_PLAYBACK, settings.backgroundPlayback)
             .putString(KEY_ENGINE_PKG, settings.enginePackage)
             .apply()

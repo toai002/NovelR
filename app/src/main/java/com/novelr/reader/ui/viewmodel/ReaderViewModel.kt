@@ -65,17 +65,19 @@ class ReaderViewModel : ViewModel() {
             }
         }.launchIn(viewModelScope)
 
-        // Nhóm 2: Trạng thái khởi tạo, thông báo lỗi & tiêu đề sách/file .txt
+        // Nhóm 2: Trạng thái khởi tạo, thông báo lỗi, danh sách giọng hệ thống & tiêu đề sách/file .txt
         observerJobs += combine(
             manager.isInitialized,
             manager.errorMessage,
-            manager.bookTitle
-        ) { initialized, error, title ->
+            manager.bookTitle,
+            manager.availableSystemVoices
+        ) { initialized, error, title, systemVoices ->
             _uiState.update { current ->
                 current.copy(
                     isTtsInitialized = initialized,
                     errorMessage = error,
-                    bookTitle = if (title.isNotBlank()) title else current.bookTitle
+                    bookTitle = if (title.isNotBlank()) title else current.bookTitle,
+                    availableSystemVoices = systemVoices
                 )
             }
         }.launchIn(viewModelScope)
@@ -221,6 +223,16 @@ class ReaderViewModel : ViewModel() {
 
     fun updateBackgroundPlayback(enabled: Boolean) {
         val newSettings = _uiState.value.settings.copy(backgroundPlayback = enabled)
+        ttsManager?.updateSettings(newSettings)
+    }
+
+    fun updateWarmVoiceFilter(enabled: Boolean) {
+        val newSettings = _uiState.value.settings.copy(warmVoiceFilter = enabled)
+        ttsManager?.updateSettings(newSettings)
+    }
+
+    fun selectSystemVoice(voiceName: String?) {
+        val newSettings = _uiState.value.settings.copy(selectedSystemVoice = voiceName)
         ttsManager?.updateSettings(newSettings)
     }
 

@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.novelr.reader.model.EngineInfo
 import com.novelr.reader.model.ReadingTheme
+import com.novelr.reader.model.SystemVoiceInfo
 import com.novelr.reader.model.TtsEngineType
 import com.novelr.reader.model.TtsSettings
 import com.novelr.reader.model.VieNeuModelStatus
@@ -73,16 +74,19 @@ fun SettingsSheet(
     settings: TtsSettings,
     readingTheme: ReadingTheme,
     availableEngines: List<EngineInfo>,
+    availableSystemVoices: List<SystemVoiceInfo>,
     vieneuStatus: VieNeuModelStatus,
     downloadProgress: Float,
     onSpeechRateChange: (Float) -> Unit,
     onPitchChange: (Float) -> Unit,
     onSentencePauseChange: (Int) -> Unit,
+    onWarmVoiceFilterChange: (Boolean) -> Unit,
     onBackgroundPlaybackChange: (Boolean) -> Unit,
     onReadingThemeChange: (ReadingTheme) -> Unit,
     onResetVoiceDefaults: () -> Unit,
     onRequestIgnoreBatteryOptimizations: () -> Unit,
     onEngineSelected: (String) -> Unit,
+    onSystemVoiceSelected: (String?) -> Unit,
     onEngineTypeSelected: (TtsEngineType) -> Unit,
     onVieNeuVoiceSelected: (String) -> Unit,
     onLookaheadBufferSizeChange: (Int) -> Unit,
@@ -157,8 +161,8 @@ fun SettingsSheet(
                 }
             }
 
-            // 2. CHỌN CÔNG NGHỆ GIỌNG ĐỌC
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            // 2. CHỌN CÔNG NGHỆ GIỌNG ĐỌC & BỘ LỌC LÀM ẤM CHỐNG CHÓI TAI
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = "Công nghệ tổng hợp giọng nói",
                     style = MaterialTheme.typography.titleSmall,
@@ -182,6 +186,45 @@ fun SettingsSheet(
                         icon = { Icon(Icons.Default.RecordVoiceOver, contentDescription = null) }
                     ) {
                         Text("Hệ Thống")
+                    }
+                }
+
+                // BỘ LỌC LÀM ẤM GIỌNG ĐỌC (CHỐNG CHÓI TAI)
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (settings.warmVoiceFilter) {
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        }
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Làm ấm giọng đọc (Chống chói tai)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Khử âm xuýt gắt (De-Esser 4kHz–8kHz), hạ nhẹ độ căng giọng hệ thống & ưu tiên giọng trầm ấm.",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Switch(
+                            checked = settings.warmVoiceFilter,
+                            onCheckedChange = onWarmVoiceFilterChange
+                        )
                     }
                 }
             }
@@ -369,6 +412,36 @@ fun SettingsSheet(
                     }
                 }
             } else {
+                // Chọn biến thể Giọng Tiếng Việt Hệ thống (Nam trầm / Nữ dịu) + Engine Picker
+                if (availableSystemVoices.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "Chọn âm sắc giọng Tiếng Việt Hệ thống",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            FilterChip(
+                                selected = settings.selectedSystemVoice == null,
+                                onClick = { onSystemVoiceSelected(null) },
+                                label = { Text("Tự động (Ưu tiên giọng ấm)", fontSize = 12.sp) }
+                            )
+                            availableSystemVoices.take(8).forEach { voiceInfo ->
+                                FilterChip(
+                                    selected = settings.selectedSystemVoice == voiceInfo.name,
+                                    onClick = { onSystemVoiceSelected(voiceInfo.name) },
+                                    label = { Text(voiceInfo.label, fontSize = 12.sp) }
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // Lựa chọn System TTS Engine Picker
                 Column {
                     Text(

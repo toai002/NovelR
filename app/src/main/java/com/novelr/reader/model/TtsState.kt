@@ -32,6 +32,12 @@ data class VieNeuVoice(
     val description: String
 )
 
+data class SystemVoiceInfo(
+    val name: String,        // ID giọng của Android TTS (ví dụ: vi-vn-x-vid-local)
+    val label: String,       // Tên hiển thị thân thiện (ví dụ: Nam Trầm Ấm - Khuyên dùng)
+    val isOffline: Boolean   // Chạy offline không cần mạng
+)
+
 data class EngineInfo(
     val label: String,
     val packageName: String
@@ -41,11 +47,13 @@ data class TtsSettings(
     val speechRate: Float = DEFAULT_SPEECH_RATE,
     val pitch: Float = DEFAULT_PITCH,
     val enginePackage: String? = null,
+    val selectedSystemVoice: String? = null,
     val engineType: TtsEngineType = TtsEngineType.NATIVE_SYSTEM,
     val selectedVieNeuVoice: String = DEFAULT_VIENEU_VOICE,
     val lookaheadBufferSize: Int = DEFAULT_LOOKAHEAD,
     val sentencePauseMs: Int = DEFAULT_SENTENCE_PAUSE_MS,
     val clausePauseMs: Int = DEFAULT_CLAUSE_PAUSE_MS,
+    val warmVoiceFilter: Boolean = DEFAULT_WARM_VOICE_FILTER, // Bộ lọc làm ấm giọng, giảm tần số cao chói tai
     val backgroundPlayback: Boolean = true
 ) {
     companion object {
@@ -55,27 +63,32 @@ data class TtsSettings(
         const val DEFAULT_LOOKAHEAD = 2
         const val DEFAULT_SENTENCE_PAUSE_MS = 550
         const val DEFAULT_CLAUSE_PAUSE_MS = 240
+        const val DEFAULT_WARM_VOICE_FILTER = true
     }
 
     val isDefaultVoiceConfig: Boolean
         get() = speechRate == DEFAULT_SPEECH_RATE &&
                 pitch == DEFAULT_PITCH &&
                 selectedVieNeuVoice == DEFAULT_VIENEU_VOICE &&
+                selectedSystemVoice == null &&
                 lookaheadBufferSize == DEFAULT_LOOKAHEAD &&
                 sentencePauseMs == DEFAULT_SENTENCE_PAUSE_MS &&
-                clausePauseMs == DEFAULT_CLAUSE_PAUSE_MS
+                clausePauseMs == DEFAULT_CLAUSE_PAUSE_MS &&
+                warmVoiceFilter == DEFAULT_WARM_VOICE_FILTER
 
     /**
-     * Khôi phục toàn bộ thông số chỉnh giọng (tốc độ, cao độ, khoảng nghỉ, nhân vật, bộ đệm)
+     * Khôi phục toàn bộ thông số chỉnh giọng (tốc độ, cao độ, khoảng nghỉ, nhân vật, bộ lọc ấm)
      * về mặc định chuẩn nhưng giữ nguyên loại Engine đang chọn.
      */
     fun resetVoiceToDefault(): TtsSettings = copy(
         speechRate = DEFAULT_SPEECH_RATE,
         pitch = DEFAULT_PITCH,
         selectedVieNeuVoice = DEFAULT_VIENEU_VOICE,
+        selectedSystemVoice = null,
         lookaheadBufferSize = DEFAULT_LOOKAHEAD,
         sentencePauseMs = DEFAULT_SENTENCE_PAUSE_MS,
-        clausePauseMs = DEFAULT_CLAUSE_PAUSE_MS
+        clausePauseMs = DEFAULT_CLAUSE_PAUSE_MS,
+        warmVoiceFilter = DEFAULT_WARM_VOICE_FILTER
     )
 }
 
@@ -89,6 +102,7 @@ data class ReaderUiState(
     val readingTheme: ReadingTheme = ReadingTheme.SEPIA,
     val settings: TtsSettings = TtsSettings(),
     val availableEngines: List<EngineInfo> = emptyList(),
+    val availableSystemVoices: List<SystemVoiceInfo> = emptyList(),
     val isTtsInitialized: Boolean = false,
     val errorMessage: String? = null,
 

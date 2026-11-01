@@ -95,6 +95,7 @@ class VieNeuPreBufferQueue(
                         pitch = settings.pitch,
                         sentencePauseMs = settings.sentencePauseMs,
                         clausePauseMs = settings.clausePauseMs,
+                        warmVoiceFilter = settings.warmVoiceFilter,
                         onClauseReady = onClauseReady
                     )
                     if (synthesized.isNotEmpty()) {
@@ -154,7 +155,8 @@ class VieNeuPreBufferQueue(
                             speed = settings.speechRate,
                             pitch = settings.pitch,
                             sentencePauseMs = settings.sentencePauseMs,
-                            clausePauseMs = settings.clausePauseMs
+                            clausePauseMs = settings.clausePauseMs,
+                            warmVoiceFilter = settings.warmVoiceFilter
                         )
                     }
                     if (isActive && pcm.isNotEmpty()) {

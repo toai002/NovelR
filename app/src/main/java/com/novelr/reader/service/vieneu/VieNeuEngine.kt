@@ -463,6 +463,7 @@ class VieNeuEngine(private val context: Context) {
         pitch: Float,
         sentencePauseMs: Int = 550,
         clausePauseMs: Int = 240,
+        warmVoiceFilter: Boolean = true,
         onClauseReady: (ShortArray) -> Unit
     ): ShortArray = withContext(Dispatchers.Default) {
         if (text.isBlank()) return@withContext ShortArray(0)
@@ -505,7 +506,13 @@ class VieNeuEngine(private val context: Context) {
             }
 
             val chunkPcm = try {
-                runOnnxInference(clause, voiceId, speed, trailingPauseMs = basePauseMs)
+                runOnnxInference(
+                    text = clause,
+                    voiceId = voiceId,
+                    speed = speed,
+                    trailingPauseMs = basePauseMs,
+                    warmVoiceFilter = warmVoiceFilter
+                )
             } catch (e: Exception) {
                 Log.e(TAG, "Lỗi suy luận ONNX mệnh đề '$clause': ${e.message}", e)
                 ShortArray(0)
@@ -539,7 +546,8 @@ class VieNeuEngine(private val context: Context) {
         speed: Float,
         pitch: Float,
         sentencePauseMs: Int = 550,
-        clausePauseMs: Int = 240
+        clausePauseMs: Int = 240,
+        warmVoiceFilter: Boolean = true
     ): ShortArray = synthesizeStreaming(
         text = text,
         voiceId = voiceId,
@@ -547,6 +555,7 @@ class VieNeuEngine(private val context: Context) {
         pitch = pitch,
         sentencePauseMs = sentencePauseMs,
         clausePauseMs = clausePauseMs,
+        warmVoiceFilter = warmVoiceFilter,
         onClauseReady = {}
     )
 
@@ -558,7 +567,8 @@ class VieNeuEngine(private val context: Context) {
         text: String,
         voiceId: String,
         speed: Float,
-        trailingPauseMs: Int = 450
+        trailingPauseMs: Int = 450,
+        warmVoiceFilter: Boolean = true
     ): ShortArray {
         val env = ortEnv ?: return ShortArray(0)
         val sText = textEncoderSession ?: return ShortArray(0)
@@ -679,7 +689,7 @@ class VieNeuEngine(private val context: Context) {
                                 }
                             }
 
-                            return postProcessWaveform(rawWav, trailingPauseMs)
+                            return postProcessWaveform(rawWav, trailingPauseMs, warmVoiceFilter)
                         }
                     }
                 }
@@ -695,10 +705,15 @@ class VieNeuEngine(private val context: Context) {
     }
 
     /**
-     * Làm mượt biên độ đầu/cuối bằng đường cong Raised-Cosine (Hann Fade-in 28ms / Fade-out 55ms)
-     * và chèn khoảng nghỉ lấy hơi tự nhiên [trailingPauseMs] để chuyển câu êm ái như người thật đọc.
+     * Làm mượt biên độ đầu/cuối bằng đường cong Raised-Cosine (Hann Fade-in 28ms / Fade-out 55ms),
+     * áp dụng bộ lọc DSP Làm Ấm Giọng (De-Esser & Warm Low-Pass Softening giảm chói dải tần cao 4kHz-8kHz)
+     * và chèn khoảng nghỉ lấy hơi tự nhiên [trailingPauseMs].
      */
-    private fun postProcessWaveform(wav: FloatArray, trailingPauseMs: Int): ShortArray {
+    private fun postProcessWaveform(
+        wav: FloatArray,
+        trailingPauseMs: Int,
+        warmVoiceFilter: Boolean
+    ): ShortArray {
         if (wav.isEmpty()) return ShortArray(0)
         val sr = VieNeuConstants.SAMPLE_RATE
         val threshold = 0.005f
@@ -729,13 +744,30 @@ class VieNeuEngine(private val context: Context) {
         val fadeOutSamples = (0.055f * sr).toInt().coerceAtMost(voiceLength)
         val pauseSamples = ((trailingPauseMs / 1000f) * sr).toInt().coerceAtLeast(0)
 
-        // Thêm 20ms đệm êm ở đầu câu để không bị gắt âm đầu
         val leadInSamples = (0.020f * sr).toInt()
         val totalLength = leadInSamples + voiceLength + pauseSamples
         val pcm = ShortArray(totalLength)
 
+        var prevFiltered = 0f
+        var lowShelfState = 0f
+        val peakScale = if (warmVoiceFilter) 28800f else 32767f
+
         for (i in 0 until voiceLength) {
             var sample = wav[startIdx + i]
+
+            if (warmVoiceFilter) {
+                // 1. De-Esser: Làm dịu các gai âm xuýt (s, x, ch, tr) có độ dốc biến thiên cao
+                val delta = sample - prevFiltered
+                if (abs(delta) > 0.18f) {
+                    sample = prevFiltered + delta * 0.62f
+                }
+                // 2. Bộ lọc thông thấp mềm 1 cực (Warm Low-Pass + Low-Mid Body ~250Hz)
+                lowShelfState = 0.94f * lowShelfState + 0.06f * sample
+                val smoothed = 0.78f * sample + 0.22f * prevFiltered + 0.08f * lowShelfState
+                prevFiltered = smoothed
+                sample = smoothed
+            }
+
             if (i < fadeInSamples && fadeInSamples > 0) {
                 val ratio = i.toDouble() / fadeInSamples.toDouble()
                 val gain = (0.5 * (1.0 - cos(PI * ratio))).toFloat()
@@ -746,7 +778,7 @@ class VieNeuEngine(private val context: Context) {
                 val gain = (0.5 * (1.0 - cos(PI * remain))).toFloat()
                 sample *= gain
             }
-            val shortVal = (sample * 32767f).toInt().coerceIn(-32768, 32767)
+            val shortVal = (sample * peakScale).toInt().coerceIn(-32768, 32767)
             pcm[leadInSamples + i] = shortVal.toShort()
         }
         return pcm

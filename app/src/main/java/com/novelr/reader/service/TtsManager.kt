@@ -4,9 +4,11 @@ import android.content.Context
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
 import android.util.Log
 import com.novelr.reader.model.EngineInfo
 import com.novelr.reader.model.PlaybackStatus
+import com.novelr.reader.model.SystemVoiceInfo
 import com.novelr.reader.model.TtsEngineType
 import com.novelr.reader.model.TtsSettings
 import com.novelr.reader.model.VieNeuModelStatus
@@ -32,6 +34,16 @@ class TtsManager(
     companion object {
         private const val TAG = "TtsManager"
         private const val UTTERANCE_PREFIX = "novelr_sentence_"
+
+        // Thứ tự ưu tiên các giọng Tiếng Việt ấm, ít chói nhất của Google TTS khi bật bộ lọc Làm ấm giọng
+        private val PREFERRED_WARM_VOICE_KEYWORDS = listOf(
+            "vi-vn-x-vid-local",
+            "vi-vn-x-vic-local",
+            "vi-vn-x-vie-local",
+            "vi-vn-x-vid",
+            "vi-vn-x-vic",
+            "vi-vn-x-vie"
+        )
     }
 
     // --- Native TTS Engine ---
@@ -57,6 +69,9 @@ class TtsManager(
     private val _availableEngines = MutableStateFlow<List<EngineInfo>>(emptyList())
     val availableEngines: StateFlow<List<EngineInfo>> = _availableEngines.asStateFlow()
 
+    private val _availableSystemVoices = MutableStateFlow<List<SystemVoiceInfo>>(emptyList())
+    val availableSystemVoices: StateFlow<List<SystemVoiceInfo>> = _availableSystemVoices.asStateFlow()
+
     private val _settings = MutableStateFlow(ReaderPreferences.loadSettings(context))
     val settings: StateFlow<TtsSettings> = _settings.asStateFlow()
 
@@ -70,7 +85,7 @@ class TtsManager(
     private var vieneuSynthesisJob: Job? = null
 
     init {
-        initializeNativeTts(enginePackage = null)
+        initializeNativeTts(enginePackage = _settings.value.enginePackage)
 
         // Khi model VieNeu-TTS v3 Nano vừa tải xong, tự động kích hoạt prefetch các câu tiếp theo vào RAM
         scope.launch {
@@ -127,6 +142,7 @@ class TtsManager(
             _errorMessage.value = null
         }
 
+        discoverVietnameseSystemVoices(tts)
         applySettingsToNative(tts, _settings.value)
 
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -161,6 +177,57 @@ class TtsManager(
         _isInitialized.value = true
     }
 
+    /**
+     * Quét danh sách các biến thể giọng Tiếng Việt có sẵn trong hệ thống (Nam trầm, Nữ dịu...)
+     * và đặt nhãn thân thiện để người dùng chọn giọng ít chói tai nhất.
+     */
+    private fun discoverVietnameseSystemVoices(tts: TextToSpeech) {
+        try {
+            val allVoices = tts.voices ?: emptySet()
+            val viVoices = allVoices.filter { voice ->
+                voice.locale != null && voice.locale.language.startsWith("vi", ignoreCase = true)
+            }
+
+            val mapped = viVoices.mapIndexed { idx, voice ->
+                val rawName = voice.name ?: "vi_voice_$idx"
+                val lower = rawName.lowercase()
+                val isOffline = !voice.isNetworkConnectionRequired
+                val modeSuffix = if (isOffline) "Offline" else "Online"
+
+                val friendlyBase = when {
+                    lower.contains("vid") -> "Nam Trầm Ấm ($modeSuffix • Đỡ chói)"
+                    lower.contains("vie") -> "Nam Tự Nhiên ($modeSuffix)"
+                    lower.contains("vic") -> "Nữ Dịu Dàng ($modeSuffix • Êm tai)"
+                    lower.contains("gft") -> "Nữ Sáng Rõ ($modeSuffix)"
+                    lower.contains("language") -> "Mặc Định Hệ Thống ($modeSuffix)"
+                    else -> "Giọng Việt ${idx + 1} ($rawName)"
+                }
+
+                SystemVoiceInfo(
+                    name = rawName,
+                    label = friendlyBase,
+                    isOffline = isOffline
+                )
+            }.sortedWith(
+                compareByDescending<SystemVoiceInfo> { it.isOffline }
+                    .thenBy { info ->
+                        val l = info.name.lowercase()
+                        when {
+                            l.contains("vid") -> 0
+                            l.contains("vic") -> 1
+                            l.contains("vie") -> 2
+                            else -> 3
+                        }
+                    }
+            )
+
+            _availableSystemVoices.value = mapped
+        } catch (e: Exception) {
+            Log.w(TAG, "Không thể quét danh sách giọng hệ thống: ${e.message}")
+            _availableSystemVoices.value = emptyList()
+        }
+    }
+
     private fun handleUtteranceDone(utteranceId: String?) {
         if (_playbackStatus.value != PlaybackStatus.PLAYING) return
 
@@ -170,7 +237,9 @@ class TtsManager(
 
         if (currentIdx + 1 < list.size) {
             val nextIdx = currentIdx + 1
-            val pauseMs = (_settings.value.sentencePauseMs / _settings.value.speechRate.coerceIn(0.6f, 1.6f)).toLong().coerceIn(150L, 1500L)
+            val pauseMs = (_settings.value.sentencePauseMs / _settings.value.speechRate.coerceIn(0.6f, 1.6f))
+                .toLong()
+                .coerceIn(150L, 1500L)
             scope.launch {
                 delay(pauseMs)
                 if (_playbackStatus.value == PlaybackStatus.PLAYING) {
@@ -210,7 +279,6 @@ class TtsManager(
             _currentIndex.value = 0
         }
 
-        // Nếu đang tạm dừng giữa câu ở chế độ VieNeu AI, tiếp tục phát mượt mà tại đúng vị trí dừng
         if (_settings.value.engineType == TtsEngineType.VIENEU_ON_DEVICE &&
             vieneuEngine.modelStatus.value == VieNeuModelStatus.READY &&
             _playbackStatus.value == PlaybackStatus.PAUSED &&
@@ -280,8 +348,6 @@ class TtsManager(
             if (vieneuEngine.modelStatus.value == VieNeuModelStatus.READY) {
                 speakWithVieNeu(index)
             } else {
-                // Tự động tải gói mô hình ONNX thật (~256MB) từ HuggingFace nếu chưa tải,
-                // đồng thời phát câu hiện tại bằng giọng tiếng Việt hệ thống để người dùng nghe rõ chữ ngay lập tức!
                 if (vieneuEngine.modelStatus.value == VieNeuModelStatus.NOT_DOWNLOADED) {
                     downloadVieNeuModel()
                 }
@@ -297,8 +363,10 @@ class TtsManager(
         val sentenceToRead = _sentences.value[index]
         val utteranceId = "$UTTERANCE_PREFIX$index"
 
+        // Khi bật bộ lọc Làm ấm giọng, hạ nhẹ biên độ âm lượng (0.84f) để triệt tiêu hiện tượng rè/chói đỉnh sóng trên loa điện thoại
+        val volume = if (_settings.value.warmVoiceFilter) 0.84f else 1.0f
         val params = Bundle().apply {
-            putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+            putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, volume)
         }
         tts.speak(sentenceToRead, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
     }
@@ -339,8 +407,7 @@ class TtsManager(
             return
         }
 
-        // 2. Clause-Level Streaming: Đối với câu dài chưa có trong cache, phát ngay mệnh đề đầu tiên
-        // chỉ sau ~0.5–0.8s trong khi các mệnh đề sau của câu tiếp tục được tổng hợp nối tiếp
+        // 2. Clause-Level Streaming
         val clauseChannel = Channel<ShortArray>(Channel.UNLIMITED)
         vieneuAudioPlayer.playStreamingClauses(
             clauseChannel = clauseChannel,
@@ -387,10 +454,12 @@ class TtsManager(
 
         val engineTypeChanged = oldSettings.engineType != newSettings.engineType
         val audioParamsChanged = oldSettings.selectedVieNeuVoice != newSettings.selectedVieNeuVoice ||
+                oldSettings.selectedSystemVoice != newSettings.selectedSystemVoice ||
                 oldSettings.speechRate != newSettings.speechRate ||
                 oldSettings.pitch != newSettings.pitch ||
                 oldSettings.sentencePauseMs != newSettings.sentencePauseMs ||
-                oldSettings.clausePauseMs != newSettings.clausePauseMs
+                oldSettings.clausePauseMs != newSettings.clausePauseMs ||
+                oldSettings.warmVoiceFilter != newSettings.warmVoiceFilter
 
         if (engineTypeChanged) {
             vieneuSynthesisJob?.cancel()
@@ -447,9 +516,41 @@ class TtsManager(
         }
     }
 
+    /**
+     * Áp dụng tốc độ, cao độ làm ấm (0.92x khi bật Warm Filter) và chọn giọng Nam trầm / Nữ dịu của Hệ thống.
+     */
     private fun applySettingsToNative(tts: TextToSpeech, settings: TtsSettings) {
+        try {
+            val allVoices = tts.voices ?: emptySet()
+            val targetVoice: Voice? = if (!settings.selectedSystemVoice.isNullOrBlank()) {
+                allVoices.find { it.name == settings.selectedSystemVoice }
+            } else if (settings.warmVoiceFilter) {
+                // Tự động chọn giọng Nam trầm ấm hoặc Nữ dịu của Google TTS thay vì giọng mặc định đanh chói
+                PREFERRED_WARM_VOICE_KEYWORDS.firstNotNullOfOrNull { keyword ->
+                    allVoices.find { v ->
+                        v.locale?.language?.startsWith("vi", ignoreCase = true) == true &&
+                                v.name?.lowercase()?.contains(keyword) == true
+                    }
+                }
+            } else {
+                null
+            }
+
+            if (targetVoice != null) {
+                tts.voice = targetVoice
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Không thể đổi voice cụ thể của hệ thống: ${e.message}")
+        }
+
         tts.setSpeechRate(settings.speechRate)
-        tts.setPitch(settings.pitch)
+        // Khi bật bộ lọc Làm ấm giọng, tự động hạ nhẹ cao độ hệ thống 8% (0.92x) để triệt tiêu âm kim loại chói tai
+        val effectivePitch = if (settings.warmVoiceFilter) {
+            (settings.pitch * 0.92f).coerceIn(0.5f, 1.5f)
+        } else {
+            settings.pitch
+        }
+        tts.setPitch(effectivePitch)
     }
 
     fun release() {
