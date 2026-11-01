@@ -8,6 +8,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -79,9 +80,7 @@ class VieNeuAudioPlayer(
     fun isPausedMidSentence(): Boolean = isActiveSession.get() && isPaused.get()
 
     /**
-     * Phát một mảng PCM Audio cho một câu.
-     * Khi phát xong hoàn toàn, gọi callback [onCompleted].
-     * Sử dụng [sessionIdGenerator] để tránh race-condition khi chuyển câu liên tục.
+     * Phát một mảng PCM Audio đã có sẵn trong RAM cache.
      */
     fun playPcm(
         pcmData: ShortArray,
@@ -104,40 +103,16 @@ class VieNeuAudioPlayer(
                 track.play()
                 onStart()
 
-                var offset = 0
-                while (offset < pcmData.size && isActive && sessionIdGenerator.get() == currentSessionId) {
-                    if (isPaused.get()) {
-                        track.pause()
-                        while (isPaused.get() && isActive && sessionIdGenerator.get() == currentSessionId) {
-                            delay(25)
-                        }
-                        if (isActive && sessionIdGenerator.get() == currentSessionId) {
-                            track.play()
-                        } else {
-                            break
-                        }
-                    }
-
-                    val toWrite = minOf(CHUNK_SIZE, pcmData.size - offset)
-                    val written = track.write(pcmData, offset, toWrite, AudioTrack.WRITE_BLOCKING)
-                    if (written > 0) {
-                        offset += written
-                    } else {
-                        break
-                    }
-                }
-
-                if (isActive && sessionIdGenerator.get() == currentSessionId && !isPaused.get() && offset >= pcmData.size) {
-                    // Chờ phần cứng xả nốt buffer cuối cùng
+                val completedNormally = writePcmBuffer(track, pcmData, currentSessionId)
+                if (completedNormally && isActive && sessionIdGenerator.get() == currentSessionId && !isPaused.get()) {
                     val drainMs = (minBufferSize.toFloat() / (sampleRate * 2) * 1000).toLong()
-                    delay(drainMs.coerceIn(40L, 180L))
+                    delay(drainMs.coerceIn(40L, 160L))
                     if (isActive && sessionIdGenerator.get() == currentSessionId && !isPaused.get()) {
                         isActiveSession.set(false)
                         onCompleted()
                     }
                 }
             } catch (_: CancellationException) {
-                // Hủy chủ động khi seek hoặc stop
             } catch (e: Exception) {
                 Log.e(TAG, "Lỗi trong khi phát AudioTrack: ${e.message}", e)
             } finally {
@@ -146,6 +121,110 @@ class VieNeuAudioPlayer(
                 }
             }
         }
+    }
+
+    /**
+     * Phát Streaming theo từng mệnh đề (Clause-Level Streaming) cho câu dài:
+     * Ngay khi mệnh đề đầu tiên được gửi vào [clauseChannel] (~0.5–0.8 giây), AudioTrack lập tức phát ra tiếng
+     * trong khi các mệnh đề sau của câu dài tiếp tục chảy vào channel mà không cần chờ hết cả câu.
+     */
+    fun playStreamingClauses(
+        clauseChannel: ReceiveChannel<ShortArray>,
+        onStart: () -> Unit,
+        onCompleted: () -> Unit,
+        onEmptyFallback: () -> Unit
+    ) {
+        stop()
+
+        val currentSessionId = sessionIdGenerator.incrementAndGet()
+        isActiveSession.set(true)
+        isPaused.set(false)
+
+        playbackJob = scope.launch(Dispatchers.IO) {
+            val track = ensureAudioTrack() ?: run {
+                onEmptyFallback()
+                return@launch
+            }
+            var hasStartedPlaying = false
+            var allChunksWritten = true
+
+            try {
+                for (clausePcm in clauseChannel) {
+                    if (!isActive || sessionIdGenerator.get() != currentSessionId) {
+                        allChunksWritten = false
+                        break
+                    }
+                    if (clausePcm.isEmpty()) continue
+
+                    if (!hasStartedPlaying) {
+                        hasStartedPlaying = true
+                        track.play()
+                        onStart()
+                    }
+
+                    val finishedChunk = writePcmBuffer(track, clausePcm, currentSessionId)
+                    if (!finishedChunk) {
+                        allChunksWritten = false
+                        break
+                    }
+                }
+
+                if (!hasStartedPlaying) {
+                    if (isActive && sessionIdGenerator.get() == currentSessionId) {
+                        isActiveSession.set(false)
+                        onEmptyFallback()
+                    }
+                    return@launch
+                }
+
+                if (allChunksWritten && isActive && sessionIdGenerator.get() == currentSessionId && !isPaused.get()) {
+                    val drainMs = (minBufferSize.toFloat() / (sampleRate * 2) * 1000).toLong()
+                    delay(drainMs.coerceIn(40L, 160L))
+                    if (isActive && sessionIdGenerator.get() == currentSessionId && !isPaused.get()) {
+                        isActiveSession.set(false)
+                        onCompleted()
+                    }
+                }
+            } catch (_: CancellationException) {
+            } catch (e: Exception) {
+                Log.e(TAG, "Lỗi khi phát Streaming AudioTrack: ${e.message}", e)
+            } finally {
+                clauseChannel.cancel()
+                if (sessionIdGenerator.get() == currentSessionId) {
+                    isActiveSession.set(false)
+                }
+            }
+        }
+    }
+
+    private suspend fun writePcmBuffer(
+        track: AudioTrack,
+        pcmData: ShortArray,
+        currentSessionId: Long
+    ): Boolean {
+        var offset = 0
+        while (offset < pcmData.size && sessionIdGenerator.get() == currentSessionId) {
+            if (isPaused.get()) {
+                track.pause()
+                while (isPaused.get() && sessionIdGenerator.get() == currentSessionId) {
+                    delay(25)
+                }
+                if (sessionIdGenerator.get() == currentSessionId) {
+                    track.play()
+                } else {
+                    return false
+                }
+            }
+
+            val toWrite = minOf(CHUNK_SIZE, pcmData.size - offset)
+            val written = track.write(pcmData, offset, toWrite, AudioTrack.WRITE_BLOCKING)
+            if (written > 0) {
+                offset += written
+            } else {
+                return false
+            }
+        }
+        return offset >= pcmData.size
     }
 
     fun pause() {

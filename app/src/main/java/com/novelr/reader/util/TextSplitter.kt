@@ -5,7 +5,7 @@ import java.util.Locale
 
 object TextSplitter {
 
-    private const val MAX_SENTENCE_LENGTH = 300
+    private const val MAX_SENTENCE_LENGTH = 180
     private const val PLACEHOLDER_DOT = "\u0000"
 
     // Các từ viết tắt phổ biến trong tiếng Việt không nên ngắt câu tại dấu chấm

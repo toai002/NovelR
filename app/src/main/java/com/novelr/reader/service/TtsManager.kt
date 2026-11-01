@@ -16,6 +16,7 @@ import com.novelr.reader.service.vieneu.VieNeuPreBufferQueue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -292,41 +293,73 @@ class TtsManager(
 
     private fun speakWithVieNeu(index: Int) {
         vieneuSynthesisJob?.cancel()
-        vieneuSynthesisJob = scope.launch(Dispatchers.Main) {
-            val list = _sentences.value
-            val pcm = vieneuPreBufferQueue.getOrSynthesizeSentence(
-                index = index,
-                sentences = list,
-                settings = _settings.value
-            )
+        val list = _sentences.value
+        if (index !in list.indices) return
 
-            if (_playbackStatus.value != PlaybackStatus.PLAYING) return@launch
-
-            if (pcm.isEmpty()) {
-                // Nếu câu chưa tổng hợp được qua ONNX, chuyển tiếp mượt sang giọng hệ thống
-                speakWithNativeTts(index)
-                return@launch
+        val onSentenceFinished: () -> Unit = {
+            scope.launch {
+                if (_playbackStatus.value == PlaybackStatus.PLAYING) {
+                    if (index + 1 < list.size) {
+                        val nextIdx = index + 1
+                        _currentIndex.value = nextIdx
+                        speakSentence(nextIdx)
+                    } else {
+                        _playbackStatus.value = PlaybackStatus.COMPLETED
+                    }
+                }
             }
+        }
 
+        // 1. Fast-path (0ms): Nếu câu đã được đệm sẵn trong RAM thì phát ngay lập tức
+        val cachedPcm = vieneuPreBufferQueue.getCachedSentence(
+            index = index,
+            sentences = list,
+            settings = _settings.value
+        )
+        if (cachedPcm != null && cachedPcm.isNotEmpty()) {
             vieneuAudioPlayer.playPcm(
-                pcmData = pcm,
+                pcmData = cachedPcm,
                 onStart = {
                     scope.launch { _playbackStatus.value = PlaybackStatus.PLAYING }
                 },
-                onCompleted = {
-                    scope.launch {
-                        if (_playbackStatus.value == PlaybackStatus.PLAYING) {
-                            if (index + 1 < list.size) {
-                                val nextIdx = index + 1
-                                _currentIndex.value = nextIdx
-                                speakSentence(nextIdx)
-                            } else {
-                                _playbackStatus.value = PlaybackStatus.COMPLETED
-                            }
-                        }
+                onCompleted = onSentenceFinished
+            )
+            return
+        }
+
+        // 2. Clause-Level Streaming: Đối với câu dài chưa có trong cache, phát ngay mệnh đề đầu tiên
+        // chỉ sau ~0.5–0.8s trong khi các mệnh đề sau của câu tiếp tục được tổng hợp nối tiếp
+        val clauseChannel = Channel<ShortArray>(Channel.UNLIMITED)
+        vieneuAudioPlayer.playStreamingClauses(
+            clauseChannel = clauseChannel,
+            onStart = {
+                scope.launch { _playbackStatus.value = PlaybackStatus.PLAYING }
+            },
+            onCompleted = onSentenceFinished,
+            onEmptyFallback = {
+                scope.launch {
+                    if (_playbackStatus.value == PlaybackStatus.PLAYING) {
+                        speakWithNativeTts(index)
                     }
                 }
-            )
+            }
+        )
+
+        vieneuSynthesisJob = scope.launch(Dispatchers.Main) {
+            try {
+                vieneuPreBufferQueue.streamAndCacheSentence(
+                    index = index,
+                    sentences = list,
+                    settings = _settings.value,
+                    onClauseReady = { clausePcm ->
+                        if (_playbackStatus.value == PlaybackStatus.PLAYING && clausePcm.isNotEmpty()) {
+                            clauseChannel.trySend(clausePcm)
+                        }
+                    }
+                )
+            } finally {
+                clauseChannel.close()
+            }
         }
     }
 

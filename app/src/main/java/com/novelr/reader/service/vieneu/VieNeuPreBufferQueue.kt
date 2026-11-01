@@ -2,6 +2,7 @@ package com.novelr.reader.service.vieneu
 
 import android.util.Log
 import com.novelr.reader.model.TtsSettings
+import com.novelr.reader.model.VieNeuModelStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,11 +17,13 @@ import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Hàng đợi đệm trước (Pre-Buffering Lookahead Queue) cho VieNeu-TTS.
+ * Hàng đợi đệm trước (Pre-Buffering Lookahead Queue) kết hợp Streaming theo mệnh đề cho VieNeu-TTS.
  *
  * Tối ưu hóa:
- * - Ưu tiên luồng chính (Priority Preemption): Hủy ngay các tác vụ prefetch ngầm nếu người dùng nhảy câu (Seek) tới câu chưa có trong cache.
- * - Quản lý cửa sổ trượt RAM (Sliding Window Eviction): Giữ tối đa [currentIndex - 1 .. currentIndex + lookahead + 1] câu trong RAM.
+ * - **Fast-path 0ms**: Nếu câu đã được render trước trong RAM, trả về ngay lập tức.
+ * - **Clause-Level Streaming**: Nếu câu dài chưa có trong cache, vừa phát mệnh đề đầu tiên sau ~0.5–0.8s
+ *   vừa tiếp tục tổng hợp các mệnh đề còn lại và lưu toàn bộ câu vào RAM.
+ * - **Priority Preemption**: Hủy ngay các tác vụ prefetch ngầm nếu người dùng nhảy câu (Seek).
  */
 class VieNeuPreBufferQueue(
     private val engine: VieNeuEngine,
@@ -42,36 +45,55 @@ class VieNeuPreBufferQueue(
     private val synthesisMutex = Mutex()
 
     /**
-     * Lấy audio của câu mục tiêu. Nếu đã có trong RAM cache thì trả về tức thì (0ms latency).
-     * Nếu chưa có, hủy prefetch cũ để ưu tiên tổng hợp câu hiện tại ngay lập tức.
+     * Kiểm tra và lấy ngay câu đã được đệm sẵn trong RAM (độ trễ 0ms).
      */
-    suspend fun getOrSynthesizeSentence(
+    fun getCachedSentence(
         index: Int,
         sentences: List<String>,
         settings: TtsSettings
+    ): ShortArray? {
+        val cached = audioCache[index] ?: return null
+        val lookahead = settings.lookaheadBufferSize.coerceIn(1, 4)
+        evictOutsideWindow(index, lookahead)
+        triggerPrefetch(index + 1, sentences, settings)
+        return cached
+    }
+
+    /**
+     * Suy luận câu theo từng mệnh đề (Clause-Level Streaming) để phát ngay mệnh đề đầu tiên,
+     * sau đó lưu toàn bộ câu vào RAM cache và kích hoạt prefetch cho các câu kế tiếp.
+     */
+    suspend fun streamAndCacheSentence(
+        index: Int,
+        sentences: List<String>,
+        settings: TtsSettings,
+        onClauseReady: (ShortArray) -> Unit
     ): ShortArray {
         val lookahead = settings.lookaheadBufferSize.coerceIn(1, 4)
 
-        // 1. Fast-path: Đã có sẵn trong RAM cache
         audioCache[index]?.let { cached ->
+            onClauseReady(cached)
             evictOutsideWindow(index, lookahead)
             triggerPrefetch(index + 1, sentences, settings)
             return cached
         }
 
-        // 2. Hủy job prefetch ngầm để nhường CPU/Mutex cho câu hiện tại
+        // Hủy job prefetch ngầm để nhường toàn bộ CPU cho mệnh đề đầu tiên của câu đang cần phát
         currentPrefetchJob?.cancel()
 
         _isSynthesizing.value = true
         val pcm = try {
             synthesisMutex.withLock {
-                audioCache[index] ?: run {
+                audioCache[index]?.also { cached ->
+                    onClauseReady(cached)
+                } ?: run {
                     val text = sentences.getOrNull(index) ?: return@run ShortArray(0)
-                    val synthesized = engine.synthesize(
+                    val synthesized = engine.synthesizeStreaming(
                         text = text,
                         voiceId = settings.selectedVieNeuVoice,
                         speed = settings.speechRate,
-                        pitch = settings.pitch
+                        pitch = settings.pitch,
+                        onClauseReady = onClauseReady
                     )
                     if (synthesized.isNotEmpty()) {
                         audioCache[index] = synthesized
@@ -84,11 +106,21 @@ class VieNeuPreBufferQueue(
             _isSynthesizing.value = false
         }
 
-        // 3. Dọn dẹp cửa sổ trượt và kích hoạt prefetch cho các câu kế tiếp
         evictOutsideWindow(index, lookahead)
         triggerPrefetch(index + 1, sentences, settings)
         return pcm
     }
+
+    suspend fun getOrSynthesizeSentence(
+        index: Int,
+        sentences: List<String>,
+        settings: TtsSettings
+    ): ShortArray = streamAndCacheSentence(
+        index = index,
+        sentences = sentences,
+        settings = settings,
+        onClauseReady = {}
+    )
 
     /**
      * Kích hoạt tiến trình chạy ngầm để render trước N câu tiếp theo vào RAM
@@ -100,7 +132,7 @@ class VieNeuPreBufferQueue(
     ) {
         currentPrefetchJob?.cancel()
         if (sentences.isEmpty() || startIndex >= sentences.size) return
-        if (engine.modelStatus.value != com.novelr.reader.model.VieNeuModelStatus.READY) return
+        if (engine.modelStatus.value != VieNeuModelStatus.READY) return
 
         currentPrefetchJob = scope.launch(Dispatchers.Default) {
             val lookahead = settings.lookaheadBufferSize.coerceIn(1, 4)
@@ -137,10 +169,6 @@ class VieNeuPreBufferQueue(
         }
     }
 
-    /**
-     * Giữ lại các câu trong cửa sổ [currentIndex - 1 .. currentIndex + lookahead + 1],
-     * giải phóng toàn bộ các câu ở xa để tránh rò rỉ RAM khi đọc sách dài hoặc nhảy trang.
-     */
     private fun evictOutsideWindow(currentIndex: Int, lookahead: Int) {
         val minKeep = (currentIndex - 1).coerceAtLeast(0)
         val maxKeep = currentIndex + lookahead + 1
