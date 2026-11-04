@@ -21,6 +21,11 @@ object ReaderPreferences {
     private const val KEY_ENGINE_PKG = "engine_package"
     private const val KEY_FONT_SIZE = "font_size_sp"
     private const val KEY_READING_THEME = "reading_theme"
+    private const val KEY_LAST_BOOK_TITLE = "last_book_title"
+    private const val KEY_LAST_TEXT = "last_raw_text"
+    private const val KEY_LAST_INDEX = "last_sentence_index"
+
+    private const val MAX_SAVED_TEXT_CHARS = 300_000
 
     fun loadSettings(context: Context): TtsSettings {
         val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -91,5 +96,35 @@ object ReaderPreferences {
             .edit()
             .putString(KEY_READING_THEME, theme.name)
             .apply()
+    }
+
+    fun saveReadingSession(context: Context, title: String, rawText: String, currentIndex: Int) {
+        val cappedText = if (rawText.length > MAX_SAVED_TEXT_CHARS) {
+            rawText.take(MAX_SAVED_TEXT_CHARS)
+        } else {
+            rawText
+        }
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_LAST_BOOK_TITLE, title)
+            .putString(KEY_LAST_TEXT, cappedText)
+            .putInt(KEY_LAST_INDEX, currentIndex.coerceAtLeast(0))
+            .apply()
+    }
+
+    fun saveCurrentIndex(context: Context, currentIndex: Int) {
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putInt(KEY_LAST_INDEX, currentIndex.coerceAtLeast(0))
+            .apply()
+    }
+
+    fun loadLastSession(context: Context): Triple<String, String, Int>? {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val text = prefs.getString(KEY_LAST_TEXT, null) ?: return null
+        if (text.isBlank()) return null
+        val title = prefs.getString(KEY_LAST_BOOK_TITLE, "") ?: ""
+        val idx = prefs.getInt(KEY_LAST_INDEX, 0).coerceAtLeast(0)
+        return Triple(title, text, idx)
     }
 }

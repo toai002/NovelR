@@ -26,6 +26,14 @@ import kotlinx.coroutines.withContext
 
 class ReaderViewModel : ViewModel() {
 
+    companion object {
+        val DEFAULT_WELCOME_TEXT = """
+            Buổi sáng hôm ấy, mặt trời vừa ló rạng qua ngọn đồi phía xa, chiếu những tia nắng vàng óng ả xuống thung lũng. Một cơn gió nhẹ thổi qua rặng thông già, làm xào xạc những cành lá biếc.
+            Thành phố thức giấc trong tiếng chim ca ríu rít và làn sương sớm còn vương vấn trên từng phiến cỏ. Cậu thanh niên khẽ mỉm cười, gấp lại cuốn tiểu thuyết dang dở và bắt đầu một ngày mới đầy hy vọng.
+            Bạn có thể chạm trực tiếp vào bất kỳ câu nào trên trang sách này để đọc ngay từ câu đó, hoặc nhấn biểu tượng Thư mục trên thanh công cụ để mở file truyện .TXT từ điện thoại.
+        """.trimIndent()
+    }
+
     private val _uiState = MutableStateFlow(ReaderUiState())
     val uiState: StateFlow<ReaderUiState> = _uiState.asStateFlow()
 
@@ -46,7 +54,7 @@ class ReaderViewModel : ViewModel() {
         observerJobs.forEach { it.cancel() }
         observerJobs.clear()
 
-        // Nhóm 1: Trạng thái phát & danh sách câu (tối đa 5 flows để dùng typed combine chuẩn của Kotlin)
+        // Nhóm 1: Trạng thái phát & danh sách câu
         observerJobs += combine(
             manager.playbackStatus,
             manager.currentIndex,
@@ -54,6 +62,7 @@ class ReaderViewModel : ViewModel() {
             manager.settings,
             manager.availableEngines
         ) { status, index, sentences, settings, engines ->
+            appContext?.let { ReaderPreferences.saveCurrentIndex(it, index) }
             _uiState.update { current ->
                 current.copy(
                     playbackStatus = status,
@@ -65,7 +74,7 @@ class ReaderViewModel : ViewModel() {
             }
         }.launchIn(viewModelScope)
 
-        // Nhóm 2: Trạng thái khởi tạo, thông báo lỗi, danh sách giọng hệ thống, đoạn văn & tiêu đề sách/file .txt
+        // Nhóm 2: Trạng thái khởi tạo, thông báo lỗi, danh sách giọng hệ thống, đoạn văn & tiêu đề sách
         observerJobs += combine(
             manager.isInitialized,
             manager.errorMessage,
@@ -100,6 +109,33 @@ class ReaderViewModel : ViewModel() {
                 )
             }
         }.launchIn(viewModelScope)
+
+        // Khôi phục bài đọc gần nhất (hoặc văn bản hướng dẫn mẫu) giống @Voice Aloud Reader
+        if (manager.sentences.value.isEmpty()) {
+            restoreOrInitDefaultBook(service.applicationContext, manager)
+        }
+    }
+
+    private fun restoreOrInitDefaultBook(context: Context, manager: TtsManager) {
+        viewModelScope.launch {
+            val saved = ReaderPreferences.loadLastSession(context)
+            val title = saved?.first?.ifBlank { "NovelR Reader" } ?: "Hướng dẫn đọc nhanh (@Reader)"
+            val raw = saved?.second ?: DEFAULT_WELCOME_TEXT
+            val startIdx = saved?.third ?: 0
+
+            _uiState.update { it.copy(rawText = raw, bookTitle = title) }
+            val parsed = withContext(Dispatchers.Default) {
+                TextSplitter.parseBookContent(raw)
+            }
+            if (parsed.sentences.isNotEmpty() && manager.sentences.value.isEmpty()) {
+                manager.setBookContent(
+                    newParagraphs = parsed.paragraphs,
+                    newSentences = parsed.sentences,
+                    startIndex = startIdx.coerceIn(0, parsed.sentences.size - 1),
+                    title = title
+                )
+            }
+        }
     }
 
     fun onTextChanged(newText: String) {
@@ -108,6 +144,38 @@ class ReaderViewModel : ViewModel() {
                 rawText = newText,
                 bookTitle = if (newText.isBlank()) "" else it.bookTitle
             )
+        }
+    }
+
+    /**
+     * Nạp trực tiếp văn bản mới (từ Clipboard hoặc hộp thoại nhập văn bản) vào trang đọc kiểu @Voice Aloud Reader.
+     */
+    fun loadTextContent(
+        raw: String,
+        title: String = "Văn bản đã dán",
+        autoPlay: Boolean = false,
+        onReady: () -> Unit = {}
+    ) {
+        if (raw.isBlank()) return
+        _uiState.update { it.copy(rawText = raw, bookTitle = title, errorMessage = null) }
+
+        viewModelScope.launch {
+            val parsed = withContext(Dispatchers.Default) {
+                TextSplitter.parseBookContent(raw)
+            }
+            if (parsed.sentences.isNotEmpty()) {
+                appContext?.let { ReaderPreferences.saveReadingSession(it, title, raw, 0) }
+                ttsManager?.setBookContent(
+                    newParagraphs = parsed.paragraphs,
+                    newSentences = parsed.sentences,
+                    startIndex = 0,
+                    title = title
+                )
+                if (autoPlay) {
+                    ttsManager?.play()
+                }
+                onReady()
+            }
         }
     }
 
@@ -125,16 +193,12 @@ class ReaderViewModel : ViewModel() {
                 TxtFileLoader.loadFromUri(context, uri)
             }
             result.onSuccess { doc ->
-                _uiState.update {
-                    it.copy(
-                        rawText = doc.content,
-                        bookTitle = doc.fileName,
-                        errorMessage = null
-                    )
-                }
-                if (autoStartReading && doc.content.isNotBlank()) {
-                    startReading(onReady = onReady)
-                }
+                loadTextContent(
+                    raw = doc.content,
+                    title = doc.fileName,
+                    autoPlay = autoStartReading,
+                    onReady = onReady
+                )
             }.onFailure { err ->
                 _uiState.update {
                     it.copy(errorMessage = "Không thể đọc file .txt: ${err.message}")
@@ -143,30 +207,11 @@ class ReaderViewModel : ViewModel() {
         }
     }
 
-    /**
-     * Tách câu bất đồng bộ trên Dispatchers.Default để tránh giật lag (ANR) trên Main Thread
-     * khi người dùng dán chương truyện hoặc mở file .txt dài hàng chục nghìn từ.
-     */
     fun startReading(onReady: () -> Unit = {}) {
         val raw = _uiState.value.rawText
         if (raw.isBlank()) return
         val title = _uiState.value.bookTitle.ifBlank { "Văn bản đang đọc" }
-
-        viewModelScope.launch {
-            val parsed = withContext(Dispatchers.Default) {
-                TextSplitter.parseBookContent(raw)
-            }
-            if (parsed.sentences.isNotEmpty()) {
-                ttsManager?.setBookContent(
-                    newParagraphs = parsed.paragraphs,
-                    newSentences = parsed.sentences,
-                    startIndex = 0,
-                    title = title
-                )
-                ttsManager?.play()
-                onReady()
-            }
-        }
+        loadTextContent(raw = raw, title = title, autoPlay = true, onReady = onReady)
     }
 
     fun togglePlayPause() {

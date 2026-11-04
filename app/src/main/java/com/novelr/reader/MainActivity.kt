@@ -38,7 +38,8 @@ enum class CurrentScreen {
 class MainActivity : ComponentActivity() {
 
     private val viewModel: ReaderViewModel by viewModels()
-    private var currentScreen by mutableStateOf(CurrentScreen.PASTE)
+    // Mở thẳng vào giao diện đọc sách @Voice Aloud Reader (@reader) ngay khi khởi động
+    private var currentScreen by mutableStateOf(CurrentScreen.READER)
     private var serviceBinder: TtsAudioService? = null
     private var isServiceBound = false
 
@@ -49,9 +50,6 @@ class MainActivity : ComponentActivity() {
                 serviceBinder = ttsService
                 isServiceBound = true
                 viewModel.attachService(ttsService)
-                if (ttsService.ttsManager.sentences.value.isNotEmpty()) {
-                    currentScreen = CurrentScreen.READER
-                }
             }
         }
 
@@ -91,6 +89,9 @@ class MainActivity : ComponentActivity() {
 
                     when (currentScreen) {
                         CurrentScreen.PASTE -> {
+                            BackHandler {
+                                currentScreen = CurrentScreen.READER
+                            }
                             PasteScreen(
                                 rawText = uiState.rawText,
                                 bookTitle = uiState.bookTitle,
@@ -102,7 +103,8 @@ class MainActivity : ComponentActivity() {
                                     viewModel.loadTxtFile(
                                         context = this@MainActivity,
                                         uri = uri,
-                                        autoStartReading = false
+                                        autoStartReading = true,
+                                        onReady = { currentScreen = CurrentScreen.READER }
                                     )
                                 },
                                 onStartReading = {
@@ -113,12 +115,16 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         CurrentScreen.READER -> {
-                            BackHandler {
-                                currentScreen = CurrentScreen.PASTE
-                            }
                             ReaderScreen(
                                 uiState = uiState,
-                                onBack = { currentScreen = CurrentScreen.PASTE },
+                                onOpenTextEditor = { currentScreen = CurrentScreen.PASTE },
+                                onPasteClipboardText = { clipText ->
+                                    viewModel.loadTextContent(
+                                        raw = clipText,
+                                        title = "Văn bản từ Bộ nhớ tạm",
+                                        autoPlay = true
+                                    )
+                                },
                                 onPickTxtFile = { uri ->
                                     viewModel.loadTxtFile(
                                         context = this@MainActivity,
