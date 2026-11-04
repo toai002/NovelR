@@ -618,7 +618,7 @@ private fun AtReaderBottomConsole(
                         ) {
                             FilterChip(
                                 selected = !isVieNeu,
-                                onClick = { onEngineTypeSelected(TtsEngineType.ANDROID_SYSTEM) },
+                                onClick = { onEngineTypeSelected(TtsEngineType.NATIVE_SYSTEM) },
                                 label = { Text("Hệ thống", fontSize = 12.sp) }
                             )
                             FilterChip(
