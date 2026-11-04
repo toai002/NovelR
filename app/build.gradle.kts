@@ -12,8 +12,8 @@ android {
         applicationId = "com.novelr.reader"
         minSdk = 26
         targetSdk = 35
-        versionCode = 21
-        versionName = "2.0.1"
+        versionCode = 22
+        versionName = "2.0.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
