@@ -65,19 +65,21 @@ class ReaderViewModel : ViewModel() {
             }
         }.launchIn(viewModelScope)
 
-        // Nhóm 2: Trạng thái khởi tạo, thông báo lỗi, danh sách giọng hệ thống & tiêu đề sách/file .txt
+        // Nhóm 2: Trạng thái khởi tạo, thông báo lỗi, danh sách giọng hệ thống, đoạn văn & tiêu đề sách/file .txt
         observerJobs += combine(
             manager.isInitialized,
             manager.errorMessage,
             manager.bookTitle,
-            manager.availableSystemVoices
-        ) { initialized, error, title, systemVoices ->
+            manager.availableSystemVoices,
+            manager.paragraphs
+        ) { initialized, error, title, systemVoices, paragraphs ->
             _uiState.update { current ->
                 current.copy(
                     isTtsInitialized = initialized,
                     errorMessage = error,
                     bookTitle = if (title.isNotBlank()) title else current.bookTitle,
-                    availableSystemVoices = systemVoices
+                    availableSystemVoices = systemVoices,
+                    paragraphs = paragraphs
                 )
             }
         }.launchIn(viewModelScope)
@@ -151,11 +153,16 @@ class ReaderViewModel : ViewModel() {
         val title = _uiState.value.bookTitle.ifBlank { "Văn bản đang đọc" }
 
         viewModelScope.launch {
-            val sentences = withContext(Dispatchers.Default) {
-                TextSplitter.splitIntoSentences(raw)
+            val parsed = withContext(Dispatchers.Default) {
+                TextSplitter.parseBookContent(raw)
             }
-            if (sentences.isNotEmpty()) {
-                ttsManager?.setSentences(sentences, startIndex = 0, title = title)
+            if (parsed.sentences.isNotEmpty()) {
+                ttsManager?.setBookContent(
+                    newParagraphs = parsed.paragraphs,
+                    newSentences = parsed.sentences,
+                    startIndex = 0,
+                    title = title
+                )
                 ttsManager?.play()
                 onReady()
             }
@@ -181,6 +188,10 @@ class ReaderViewModel : ViewModel() {
 
     fun seekToSentence(index: Int) {
         ttsManager?.seekTo(index)
+    }
+
+    fun tapSentenceToRead(index: Int) {
+        ttsManager?.seekAndPlay(index)
     }
 
     fun increaseFontSize() {

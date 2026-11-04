@@ -15,6 +15,7 @@ import com.novelr.reader.model.VieNeuModelStatus
 import com.novelr.reader.service.vieneu.VieNeuAudioPlayer
 import com.novelr.reader.service.vieneu.VieNeuEngine
 import com.novelr.reader.service.vieneu.VieNeuPreBufferQueue
+import com.novelr.reader.util.ReaderParagraph
 import com.novelr.reader.util.ReaderPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -62,6 +63,9 @@ class TtsManager(
 
     private val _sentences = MutableStateFlow<List<String>>(emptyList())
     val sentences: StateFlow<List<String>> = _sentences.asStateFlow()
+
+    private val _paragraphs = MutableStateFlow<List<ReaderParagraph>>(emptyList())
+    val paragraphs: StateFlow<List<ReaderParagraph>> = _paragraphs.asStateFlow()
 
     private val _bookTitle = MutableStateFlow("")
     val bookTitle: StateFlow<String> = _bookTitle.asStateFlow()
@@ -252,10 +256,16 @@ class TtsManager(
         }
     }
 
-    fun setSentences(newSentences: List<String>, startIndex: Int = 0, title: String = "") {
+    fun setBookContent(
+        newParagraphs: List<ReaderParagraph>,
+        newSentences: List<String>,
+        startIndex: Int = 0,
+        title: String = ""
+    ) {
         stop()
         vieneuPreBufferQueue.clearCache()
         _bookTitle.value = title
+        _paragraphs.value = newParagraphs
         _sentences.value = newSentences
         _currentIndex.value = startIndex.coerceIn(0, (newSentences.size - 1).coerceAtLeast(0))
 
@@ -269,6 +279,10 @@ class TtsManager(
                 settings = _settings.value
             )
         }
+    }
+
+    fun setSentences(newSentences: List<String>, startIndex: Int = 0, title: String = "") {
+        setBookContent(emptyList(), newSentences, startIndex, title)
     }
 
     fun play() {
@@ -319,6 +333,23 @@ class TtsManager(
     fun previous() {
         val prevIdx = (_currentIndex.value - 1).coerceAtLeast(0)
         seekTo(prevIdx)
+    }
+
+    /**
+     * Khi người dùng chạm vào một câu bất kỳ trong đoạn văn bản, lập tức chuyển tới câu đó và đọc ngay.
+     */
+    fun seekAndPlay(index: Int) {
+        val list = _sentences.value
+        if (list.isEmpty()) return
+        val clamped = index.coerceIn(0, list.size - 1)
+        _currentIndex.value = clamped
+
+        vieneuSynthesisJob?.cancel()
+        vieneuAudioPlayer.stop()
+        textToSpeech?.stop()
+
+        _playbackStatus.value = PlaybackStatus.PLAYING
+        speakSentence(clamped)
     }
 
     fun seekTo(index: Int) {

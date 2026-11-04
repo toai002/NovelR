@@ -131,6 +131,7 @@ class MainActivity : ComponentActivity() {
                                 onNextSentence = viewModel::nextSentence,
                                 onPreviousSentence = viewModel::previousSentence,
                                 onSeekToSentence = viewModel::seekToSentence,
+                                onTapSentence = viewModel::tapSentenceToRead,
                                 onIncreaseFontSize = viewModel::increaseFontSize,
                                 onDecreaseFontSize = viewModel::decreaseFontSize,
                                 onReadingThemeChange = viewModel::updateReadingTheme,

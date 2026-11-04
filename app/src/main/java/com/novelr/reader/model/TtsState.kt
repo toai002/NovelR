@@ -1,5 +1,7 @@
 package com.novelr.reader.model
 
+import com.novelr.reader.util.ReaderParagraph
+
 enum class PlaybackStatus {
     IDLE,
     PLAYING,
@@ -95,6 +97,7 @@ data class TtsSettings(
 data class ReaderUiState(
     val rawText: String = "",
     val bookTitle: String = "",
+    val paragraphs: List<ReaderParagraph> = emptyList(),
     val sentences: List<String> = emptyList(),
     val currentIndex: Int = 0,
     val playbackStatus: PlaybackStatus = PlaybackStatus.IDLE,

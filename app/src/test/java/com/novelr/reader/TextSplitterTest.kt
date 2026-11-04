@@ -55,4 +55,31 @@ class TextSplitterTest {
         assertEquals(0, TextSplitter.countWords("   \n\t  "))
         assertEquals(4, TextSplitter.countWords("Xin   chào\nViệt\tNam!"))
     }
+
+    @Test
+    fun `parseBookContent should keep paragraph structure and map character tap offsets to hidden sentences`() {
+        val sampleText = """
+            Trời hôm nay nhiều mây. Gió bắt đầu thổi mạnh!
+            Liệu trời có mưa không? Có lẽ là vậy.
+        """.trimIndent()
+
+        val parsed = TextSplitter.parseBookContent(sampleText)
+        assertEquals(2, parsed.paragraphs.size)
+        assertEquals(4, parsed.sentences.size)
+
+        val p0 = parsed.paragraphs[0]
+        assertEquals("Trời hôm nay nhiều mây. Gió bắt đầu thổi mạnh!", p0.fullText)
+        assertEquals(2, p0.spans.size)
+
+        // Nhấp vào chữ "Trời" ở đầu đoạn 1 -> đọc câu 0
+        assertEquals(0, p0.findSentenceIndexAtCharOffset(2))
+        // Nhấp vào chữ "Gió" ở nửa sau đoạn 1 -> đọc câu 1
+        val gioOffset = p0.fullText.indexOf("Gió")
+        assertEquals(1, p0.findSentenceIndexAtCharOffset(gioOffset))
+
+        val p1 = parsed.paragraphs[1]
+        // Nhấp vào câu thứ 2 của đoạn 2 ("Có lẽ là vậy.") -> đọc câu 3
+        val coLeOffset = p1.fullText.indexOf("Có lẽ")
+        assertEquals(3, p1.findSentenceIndexAtCharOffset(coLeOffset))
+    }
 }
