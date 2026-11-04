@@ -6,6 +6,7 @@ import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.util.Log
 import com.novelr.reader.model.VieNeuModelStatus
+import com.novelr.reader.service.WarmAudioDspProcessor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -746,42 +747,17 @@ class VieNeuEngine(private val context: Context) {
 
         val leadInSamples = (0.020f * sr).toInt()
         val totalLength = leadInSamples + voiceLength + pauseSamples
-        val pcm = ShortArray(totalLength)
 
-        var prevFiltered = 0f
-        var lowShelfState = 0f
-        val peakScale = if (warmVoiceFilter) 28800f else 32767f
-
-        for (i in 0 until voiceLength) {
-            var sample = wav[startIdx + i]
-
-            if (warmVoiceFilter) {
-                // 1. De-Esser: Làm dịu các gai âm xuýt (s, x, ch, tr) có độ dốc biến thiên cao
-                val delta = sample - prevFiltered
-                if (abs(delta) > 0.18f) {
-                    sample = prevFiltered + delta * 0.62f
-                }
-                // 2. Bộ lọc thông thấp mềm 1 cực (Warm Low-Pass + Low-Mid Body ~250Hz)
-                lowShelfState = 0.94f * lowShelfState + 0.06f * sample
-                val smoothed = 0.78f * sample + 0.22f * prevFiltered + 0.08f * lowShelfState
-                prevFiltered = smoothed
-                sample = smoothed
-            }
-
-            if (i < fadeInSamples && fadeInSamples > 0) {
-                val ratio = i.toDouble() / fadeInSamples.toDouble()
-                val gain = (0.5 * (1.0 - cos(PI * ratio))).toFloat()
-                sample *= gain
-            }
-            if (i >= voiceLength - fadeOutSamples && fadeOutSamples > 0) {
-                val remain = (voiceLength - 1 - i).toDouble() / fadeOutSamples.toDouble()
-                val gain = (0.5 * (1.0 - cos(PI * remain))).toFloat()
-                sample *= gain
-            }
-            val shortVal = (sample * peakScale).toInt().coerceIn(-32768, 32767)
-            pcm[leadInSamples + i] = shortVal.toShort()
-        }
-        return pcm
+        return WarmAudioDspProcessor.processPcm24kHz(
+            wav = wav,
+            startIdx = startIdx,
+            voiceLength = voiceLength,
+            fadeInSamples = fadeInSamples,
+            fadeOutSamples = fadeOutSamples,
+            leadInSamples = leadInSamples,
+            totalLength = totalLength,
+            warmEnabled = warmVoiceFilter
+        )
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.novelr.reader.service
 
 import android.content.Context
+import android.media.AudioManager
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
@@ -47,12 +48,21 @@ class TtsManager(
         )
     }
 
+    // --- Audio Session & Hardware De-Esser / Anti-Harshness DSP ---
+    private val sharedAudioSessionId: Int = try {
+        val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        am?.generateAudioSessionId() ?: 0
+    } catch (_: Exception) {
+        0
+    }
+    private val warmAudioDsp = WarmAudioDspProcessor(sharedAudioSessionId)
+
     // --- Native TTS Engine ---
     private var textToSpeech: TextToSpeech? = null
 
     // --- VieNeu AI On-Device Engine (v3 Nano ONNX 24kHz) ---
     val vieneuEngine = VieNeuEngine(context)
-    private val vieneuAudioPlayer = VieNeuAudioPlayer(scope)
+    private val vieneuAudioPlayer = VieNeuAudioPlayer(scope, sharedAudioSessionId)
     val vieneuPreBufferQueue = VieNeuPreBufferQueue(vieneuEngine, scope)
 
     private val _playbackStatus = MutableStateFlow(PlaybackStatus.IDLE)
@@ -394,10 +404,15 @@ class TtsManager(
         val sentenceToRead = _sentences.value[index]
         val utteranceId = "$UTTERANCE_PREFIX$index"
 
-        // Khi bật bộ lọc Làm ấm giọng, hạ nhẹ biên độ âm lượng (0.84f) để triệt tiêu hiện tượng rè/chói đỉnh sóng trên loa điện thoại
-        val volume = if (_settings.value.warmVoiceFilter) 0.84f else 1.0f
+        warmAudioDsp.setEnabled(_settings.value.warmVoiceFilter)
+
+        // Khi bật bộ lọc Chống chói, giữ headroom âm lượng 0.92f kết hợp với bộ lọc De-Esser phần cứng trên AudioSession
+        val volume = if (_settings.value.warmVoiceFilter) 0.92f else 1.0f
         val params = Bundle().apply {
             putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, volume)
+            if (sharedAudioSessionId > 0) {
+                putInt(TextToSpeech.Engine.KEY_PARAM_SESSION_ID, sharedAudioSessionId)
+            }
         }
         tts.speak(sentenceToRead, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
     }
@@ -481,6 +496,7 @@ class TtsManager(
         _settings.value = newSettings
         ReaderPreferences.saveSettings(context, newSettings)
 
+        warmAudioDsp.setEnabled(newSettings.warmVoiceFilter)
         textToSpeech?.let { applySettingsToNative(it, newSettings) }
 
         val engineTypeChanged = oldSettings.engineType != newSettings.engineType
@@ -575,13 +591,10 @@ class TtsManager(
         }
 
         tts.setSpeechRate(settings.speechRate)
-        // Khi bật bộ lọc Làm ấm giọng, tự động hạ nhẹ cao độ hệ thống 8% (0.92x) để triệt tiêu âm kim loại chói tai
-        val effectivePitch = if (settings.warmVoiceFilter) {
-            (settings.pitch * 0.92f).coerceIn(0.5f, 1.5f)
-        } else {
-            settings.pitch
-        }
-        tts.setPitch(effectivePitch)
+        // Giữ nguyên 100% cao độ (Pitch) chuẩn của giọng đọc, tuyệt đối không trừ pitch
+        // để giữ độ tự nhiên của thanh điệu tiếng Việt và tránh hiện tượng méo tiếng vocoder.
+        tts.setPitch(settings.pitch.coerceIn(0.5f, 1.5f))
+        warmAudioDsp.setEnabled(settings.warmVoiceFilter)
     }
 
     fun release() {
@@ -590,6 +603,7 @@ class TtsManager(
         textToSpeech?.stop()
         textToSpeech?.shutdown()
         textToSpeech = null
+        warmAudioDsp.release()
         vieneuAudioPlayer.release()
         vieneuEngine.release()
     }

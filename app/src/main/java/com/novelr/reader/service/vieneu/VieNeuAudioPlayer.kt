@@ -16,7 +16,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 class VieNeuAudioPlayer(
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val audioSessionId: Int = 0
 ) {
     companion object {
         private const val TAG = "VieNeuAudioPlayer"
@@ -53,7 +54,7 @@ class VieNeuAudioPlayer(
         } catch (_: Exception) {}
 
         return try {
-            AudioTrack.Builder()
+            val builder = AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -69,8 +70,10 @@ class VieNeuAudioPlayer(
                 )
                 .setBufferSizeInBytes(minBufferSize * 2)
                 .setTransferMode(AudioTrack.MODE_STREAM)
-                .build()
-                .also { audioTrack = it }
+            if (audioSessionId > 0) {
+                builder.setSessionId(audioSessionId)
+            }
+            builder.build().also { audioTrack = it }
         } catch (e: Exception) {
             Log.e(TAG, "Lỗi tạo AudioTrack: ${e.message}", e)
             null

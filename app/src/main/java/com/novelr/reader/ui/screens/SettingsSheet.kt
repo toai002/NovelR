@@ -209,12 +209,12 @@ fun SettingsSheet(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Làm ấm giọng đọc (Chống chói tai)",
+                                text = "Chống chói tai DSP (Dynamic De-Esser)",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Khử âm xuýt gắt (De-Esser 4kHz–8kHz), hạ nhẹ độ căng giọng hệ thống & ưu tiên giọng trầm ấm.",
+                                text = "Giữ nguyên 100% cao độ (Pitch) tự nhiên; chỉ lọc bỏ gai âm xuýt & cộng hưởng chói ở dải 3.4kHz–7.5kHz bằng Biquad Notch + Multi-band EQ.",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
