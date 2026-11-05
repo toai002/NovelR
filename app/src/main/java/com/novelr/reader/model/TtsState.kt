@@ -58,7 +58,8 @@ data class TtsSettings(
     val sentencePauseMs: Int = DEFAULT_SENTENCE_PAUSE_MS,
     val clausePauseMs: Int = DEFAULT_CLAUSE_PAUSE_MS,
     val warmVoiceFilter: Boolean = DEFAULT_WARM_VOICE_FILTER, // Bộ lọc làm ấm giọng, giảm tần số cao chói tai
-    val backgroundPlayback: Boolean = true
+    val backgroundPlayback: Boolean = true,
+    val headsetAutoPlayPause: Boolean = true // Tự động phát khi kết nối tai nghe, tự động dừng khi rút/ngắt kết nối tai nghe
 ) {
     companion object {
         const val DEFAULT_SPEECH_RATE = 1.0f

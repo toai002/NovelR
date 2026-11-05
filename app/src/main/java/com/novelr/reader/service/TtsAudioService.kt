@@ -5,10 +5,16 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothHeadset
+import android.bluetooth.BluetoothProfile
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Binder
@@ -57,6 +63,77 @@ class TtsAudioService : Service() {
     private var audioFocusRequest: AudioFocusRequest? = null
     private var isForegroundActive = false
     private var resumeOnFocusGain = false
+    private var isHeadsetReceiverRegistered = false
+
+    /**
+     * BroadcastReceiver giám sát trạng thái tai nghe (tai nghe dây 3.5mm/Type-C và tai nghe Bluetooth):
+     * - Khi rút tai nghe (ACTION_AUDIO_BECOMING_NOISY hoặc HEADSET_PLUG state=0): Tự động tạm dừng để âm thanh không phát ra loa ngoài.
+     * - Khi cắm/kết nối tai nghe (HEADSET_PLUG state=1 hoặc BluetoothHeadset/A2DP connected): Tự động bắt đầu đọc tiếp sách nếu có nội dung.
+     */
+    private val headsetEventReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (!ttsManager.settings.value.headsetAutoPlayPause) return
+            val action = intent?.action ?: return
+
+            when (action) {
+                // Sự kiện tiêu chuẩn Android khi tai nghe bất ngờ bị ngắt hoặc chuyển âm sang loa ngoài
+                AudioManager.ACTION_AUDIO_BECOMING_NOISY -> {
+                    Log.d(TAG, "Tai nghe bị ngắt kết nối (AUDIO_BECOMING_NOISY) -> Tạm dừng đọc")
+                    resumeOnFocusGain = false
+                    if (ttsManager.playbackStatus.value == PlaybackStatus.PLAYING) {
+                        ttsManager.pause()
+                    }
+                }
+
+                // Cắm hoặc rút tai nghe dây (3.5mm / USB-C DAC)
+                Intent.ACTION_HEADSET_PLUG -> {
+                    val state = intent.getIntExtra("state", -1)
+                    // state: 0 = unplugged, 1 = plugged
+                    when (state) {
+                        0 -> {
+                            Log.d(TAG, "Tai nghe dây bị rút ra -> Tạm dừng đọc")
+                            resumeOnFocusGain = false
+                            if (ttsManager.playbackStatus.value == PlaybackStatus.PLAYING) {
+                                ttsManager.pause()
+                            }
+                        }
+                        1 -> {
+                            Log.d(TAG, "Tai nghe dây được cắm vào -> Tự động bắt đầu đọc")
+                            if (ttsManager.sentences.value.isNotEmpty() &&
+                                (ttsManager.playbackStatus.value == PlaybackStatus.PAUSED ||
+                                 ttsManager.playbackStatus.value == PlaybackStatus.IDLE)
+                            ) {
+                                ttsManager.play()
+                            }
+                        }
+                    }
+                }
+
+                // Kết nối hoặc ngắt kết nối tai nghe Bluetooth (A2DP / HFP Profile)
+                BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED -> {
+                    val state = intent.getIntExtra(BluetoothProfile.EXTRA_STATE, BluetoothProfile.STATE_DISCONNECTED)
+                    when (state) {
+                        BluetoothProfile.STATE_CONNECTED -> {
+                            Log.d(TAG, "Tai nghe Bluetooth đã kết nối -> Tự động bắt đầu đọc")
+                            if (ttsManager.sentences.value.isNotEmpty() &&
+                                (ttsManager.playbackStatus.value == PlaybackStatus.PAUSED ||
+                                 ttsManager.playbackStatus.value == PlaybackStatus.IDLE)
+                            ) {
+                                ttsManager.play()
+                            }
+                        }
+                        BluetoothProfile.STATE_DISCONNECTED -> {
+                            Log.d(TAG, "Tai nghe Bluetooth bị ngắt kết nối -> Tạm dừng đọc")
+                            resumeOnFocusGain = false
+                            if (ttsManager.playbackStatus.value == PlaybackStatus.PLAYING) {
+                                ttsManager.pause()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     private val audioFocusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
         when (focusChange) {
@@ -99,7 +176,32 @@ class TtsAudioService : Service() {
 
         createNotificationChannel()
         initMediaSession()
+        registerHeadsetReceiver()
         observePlaybackState()
+    }
+
+    private fun registerHeadsetReceiver() {
+        if (!isHeadsetReceiverRegistered) {
+            val filter = IntentFilter().apply {
+                addAction(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+                addAction(Intent.ACTION_HEADSET_PLUG)
+                addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED)
+            }
+            registerReceiver(headsetEventReceiver, filter)
+            isHeadsetReceiverRegistered = true
+            Log.d(TAG, "Đã đăng ký HeadsetEventReceiver (Dây & Bluetooth Auto Play/Pause)")
+        }
+    }
+
+    private fun unregisterHeadsetReceiver() {
+        if (isHeadsetReceiverRegistered) {
+            try {
+                unregisterReceiver(headsetEventReceiver)
+            } catch (e: Exception) {
+                Log.w(TAG, "Lỗi hủy đăng ký HeadsetReceiver: ${e.message}")
+            }
+            isHeadsetReceiverRegistered = false
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
@@ -433,6 +535,7 @@ class TtsAudioService : Service() {
     }
 
     override fun onDestroy() {
+        unregisterHeadsetReceiver()
         releaseWakeLock()
         abandonAudioFocus()
         mediaSession.release()

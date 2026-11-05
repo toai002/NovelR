@@ -295,6 +295,11 @@ class ReaderViewModel : ViewModel() {
         ttsManager?.updateSettings(newSettings)
     }
 
+    fun updateHeadsetAutoPlayPause(enabled: Boolean) {
+        val newSettings = _uiState.value.settings.copy(headsetAutoPlayPause = enabled)
+        ttsManager?.updateSettings(newSettings)
+    }
+
     fun updateWarmVoiceFilter(enabled: Boolean) {
         val newSettings = _uiState.value.settings.copy(warmVoiceFilter = enabled)
         ttsManager?.updateSettings(newSettings)

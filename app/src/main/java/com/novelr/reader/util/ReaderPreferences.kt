@@ -19,6 +19,7 @@ object ReaderPreferences {
     private const val KEY_LOOKAHEAD = "lookahead_buffer"
     private const val KEY_WARM_FILTER = "warm_voice_filter"
     private const val KEY_BG_PLAYBACK = "background_playback"
+    private const val KEY_HEADSET_AUTO_PLAY = "headset_auto_play_pause"
     private const val KEY_ENGINE_PKG = "engine_package"
     private const val KEY_FONT_SIZE = "font_size_sp"
     private const val KEY_READING_THEME = "reading_theme"
@@ -51,7 +52,8 @@ object ReaderPreferences {
             sentencePauseMs = prefs.getInt(KEY_SENTENCE_PAUSE, TtsSettings.DEFAULT_SENTENCE_PAUSE_MS).coerceIn(200, 1200),
             clausePauseMs = prefs.getInt(KEY_CLAUSE_PAUSE, TtsSettings.DEFAULT_CLAUSE_PAUSE_MS).coerceIn(120, 600),
             warmVoiceFilter = prefs.getBoolean(KEY_WARM_FILTER, TtsSettings.DEFAULT_WARM_VOICE_FILTER),
-            backgroundPlayback = prefs.getBoolean(KEY_BG_PLAYBACK, true)
+            backgroundPlayback = prefs.getBoolean(KEY_BG_PLAYBACK, true),
+            headsetAutoPlayPause = prefs.getBoolean(KEY_HEADSET_AUTO_PLAY, true)
         )
     }
 
@@ -69,6 +71,7 @@ object ReaderPreferences {
             .putInt(KEY_LOOKAHEAD, settings.lookaheadBufferSize)
             .putBoolean(KEY_WARM_FILTER, settings.warmVoiceFilter)
             .putBoolean(KEY_BG_PLAYBACK, settings.backgroundPlayback)
+            .putBoolean(KEY_HEADSET_AUTO_PLAY, settings.headsetAutoPlayPause)
             .putString(KEY_ENGINE_PKG, settings.enginePackage)
             .apply()
     }

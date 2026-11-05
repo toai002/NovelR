@@ -88,6 +88,7 @@ fun SettingsSheet(
     onSentencePauseChange: (Int) -> Unit,
     onWarmVoiceFilterChange: (Boolean) -> Unit,
     onBackgroundPlaybackChange: (Boolean) -> Unit,
+    onHeadsetAutoPlayPauseChange: (Boolean) -> Unit,
     onReadingThemeChange: (ReadingTheme) -> Unit,
     onResetVoiceDefaults: () -> Unit,
     onRequestIgnoreBatteryOptimizations: () -> Unit,
@@ -933,7 +934,7 @@ fun SettingsSheet(
 
             HorizontalDivider()
 
-            // 7. CHẾ ĐỘ CHẠY NỀN KHI TẮT MÀN HÌNH
+            // 7. CHẾ ĐỘ CHẠY NỀN KHI TẮT MÀN HÌNH & TỰ ĐỘNG TAI NGHE
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -942,8 +943,34 @@ fun SettingsSheet(
             ) {
                 Column(
                     modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Tự động phát/dừng khi kết nối tai nghe",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Bắt đầu đọc khi cắm/kết nối tai nghe (Dây hoặc Bluetooth); tự dừng lại ngay khi rút hoặc ngắt kết nối.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Switch(
+                            checked = settings.headsetAutoPlayPause,
+                            onCheckedChange = onHeadsetAutoPlayPauseChange
+                        )
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,

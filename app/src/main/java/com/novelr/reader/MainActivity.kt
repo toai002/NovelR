@@ -146,6 +146,7 @@ class MainActivity : ComponentActivity() {
                                 onSentencePauseChange = viewModel::updateSentencePause,
                                 onWarmVoiceFilterChange = viewModel::updateWarmVoiceFilter,
                                 onBackgroundPlaybackChange = viewModel::updateBackgroundPlayback,
+                                onHeadsetAutoPlayPauseChange = viewModel::updateHeadsetAutoPlayPause,
                                 onResetVoiceDefaults = viewModel::resetVoiceSettingsToDefault,
                                 onRequestIgnoreBatteryOptimizations = ::requestIgnoreBatteryOptimizations,
                                 onEngineSelected = viewModel::selectEngine,
