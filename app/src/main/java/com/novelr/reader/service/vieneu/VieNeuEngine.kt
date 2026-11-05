@@ -480,7 +480,14 @@ class VieNeuEngine(private val context: Context) {
         if (textEncoderSession == null || durationSession == null ||
             vectorEstimatorSession == null || codecDecoderSession == null || ortEnv == null
         ) {
-            return@withContext ShortArray(0)
+            if (areAllModelsDownloaded()) {
+                loadSessions()
+            }
+            if (textEncoderSession == null || durationSession == null ||
+                vectorEstimatorSession == null || codecDecoderSession == null || ortEnv == null
+            ) {
+                return@withContext ShortArray(0)
+            }
         }
 
         val clauses = splitIntoStreamingClauses(text)
@@ -791,7 +798,8 @@ class VieNeuEngine(private val context: Context) {
         return ids.toLongArray()
     }
 
-    fun release() {
+    @Synchronized
+    fun unloadSessions() {
         try {
             textEncoderSession?.close()
             durationSession?.close()
@@ -804,7 +812,11 @@ class VieNeuEngine(private val context: Context) {
             durationSession = null
             vectorEstimatorSession = null
             codecDecoderSession = null
-            ortEnv = null
         }
+    }
+
+    fun release() {
+        unloadSessions()
+        ortEnv = null
     }
 }

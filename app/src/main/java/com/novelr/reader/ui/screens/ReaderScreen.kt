@@ -95,6 +95,7 @@ import com.novelr.reader.model.ReadingTheme
 import com.novelr.reader.model.TtsEngineType
 import com.novelr.reader.model.TtsSettings
 import com.novelr.reader.model.VieNeuModelStatus
+import com.novelr.reader.service.piper.PiperConstants
 import com.novelr.reader.service.vieneu.VieNeuConstants
 import com.novelr.reader.util.ReaderParagraph
 import com.novelr.reader.util.SentenceSpan
@@ -132,7 +133,7 @@ private fun rememberAtReaderPalette(theme: ReadingTheme): AtReaderPalette {
                 drawerBg = Color(0xFFF1E8D7),
                 textPrimary = Color(0xFF281E15),
                 textSecondary = Color(0xFF6E5D4F),
-                activeHighlightBg = Color(0xFFFFDF7E), // Màu vàng highlight đặc trưng của @Voice Aloud Reader
+                activeHighlightBg = Color(0xFFFFDF7E),
                 activeTextPrimary = Color(0xFF140D06),
                 prebufferedHighlightBg = Color(0xFFEDE2CE),
                 accentColor = Color(0xFF9C521B),
@@ -145,7 +146,7 @@ private fun rememberAtReaderPalette(theme: ReadingTheme): AtReaderPalette {
                 drawerBg = Color(0xFF222631),
                 textPrimary = Color(0xFFDADEE6),
                 textSecondary = Color(0xFF8E97A8),
-                activeHighlightBg = Color(0xFF28456E), // Highlight xanh đậm dịu mắt ban đêm của @Voice
+                activeHighlightBg = Color(0xFF28456E),
                 activeTextPrimary = Color(0xFFFFFFFF),
                 prebufferedHighlightBg = Color(0xFF1A2433),
                 accentColor = Color(0xFF64B5F6),
@@ -158,7 +159,7 @@ private fun rememberAtReaderPalette(theme: ReadingTheme): AtReaderPalette {
                 drawerBg = Color(0xFFF4F6FA),
                 textPrimary = Color(0xFF1B2028),
                 textSecondary = Color(0xFF5E6878),
-                activeHighlightBg = Color(0xFFFFE57F), // Highlight vàng tươi rõ nét của @Voice Aloud Reader
+                activeHighlightBg = Color(0xFFFFE57F),
                 activeTextPrimary = Color(0xFF0F141C),
                 prebufferedHighlightBg = Color(0xFFEBF2FF),
                 accentColor = scheme.primary,
@@ -194,8 +195,10 @@ fun ReaderScreen(
     onSystemVoiceSelected: (String?) -> Unit,
     onEngineTypeSelected: (TtsEngineType) -> Unit,
     onVieNeuVoiceSelected: (String) -> Unit,
+    onPiperVoiceSelected: (String) -> Unit,
     onLookaheadBufferSizeChange: (Int) -> Unit,
-    onDownloadVieNeuModel: () -> Unit
+    onDownloadVieNeuModel: () -> Unit,
+    onDownloadPiperModel: () -> Unit
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
@@ -234,6 +237,10 @@ fun ReaderScreen(
 
     val activeVoiceName = remember(uiState.settings.selectedVieNeuVoice) {
         VieNeuConstants.PRESET_VOICES.find { it.id == uiState.settings.selectedVieNeuVoice }?.name ?: "Đức Trí"
+    }
+
+    val activePiperVoiceName = remember(uiState.settings.selectedPiperVoice) {
+        PiperConstants.findById(uiState.settings.selectedPiperVoice).name
     }
 
     val txtPickerLauncher = rememberLauncherForActivityResult(
@@ -282,28 +289,46 @@ fun ReaderScreen(
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             val rateText = String.format(Locale.US, "%.2fx", uiState.settings.speechRate)
-                            if (uiState.settings.engineType == TtsEngineType.VIENEU_ON_DEVICE) {
-                                Icon(
-                                    imageVector = Icons.Default.Psychology,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(12.dp),
-                                    tint = palette.accentColor
-                                )
-                                Text(
-                                    text = " VieNeu ($activeVoiceName • $rateText) • Câu ${uiState.currentIndex + 1}/${uiState.sentences.size} ($progressPercent%)",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = palette.accentColor,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            } else {
-                                Text(
-                                    text = "Hệ thống ($rateText) • Câu ${uiState.currentIndex + 1}/${uiState.sentences.size} ($progressPercent%)",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = palette.textSecondary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                            when (uiState.settings.engineType) {
+                                TtsEngineType.PIPER_ON_DEVICE -> {
+                                    Icon(
+                                        imageVector = Icons.Default.GraphicEq,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(12.dp),
+                                        tint = palette.accentColor
+                                    )
+                                    Text(
+                                        text = " Piper ($activePiperVoiceName • $rateText) • Câu ${uiState.currentIndex + 1}/${uiState.sentences.size} ($progressPercent%)",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = palette.accentColor,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                TtsEngineType.VIENEU_ON_DEVICE -> {
+                                    Icon(
+                                        imageVector = Icons.Default.Psychology,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(12.dp),
+                                        tint = palette.accentColor
+                                    )
+                                    Text(
+                                        text = " VieNeu ($activeVoiceName • $rateText) • Câu ${uiState.currentIndex + 1}/${uiState.sentences.size} ($progressPercent%)",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = palette.accentColor,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                TtsEngineType.NATIVE_SYSTEM -> {
+                                    Text(
+                                        text = "Hệ thống ($rateText) • Câu ${uiState.currentIndex + 1}/${uiState.sentences.size} ($progressPercent%)",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = palette.textSecondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
                     }
@@ -379,6 +404,7 @@ fun ReaderScreen(
                 onDecreaseFontSize = onDecreaseFontSize,
                 onReadingThemeChange = onReadingThemeChange,
                 onEngineTypeSelected = onEngineTypeSelected,
+                onPiperVoiceSelected = onPiperVoiceSelected,
                 onOpenFullSettings = { showSettingsSheet = true }
             )
         }
@@ -401,7 +427,9 @@ fun ReaderScreen(
                 BookParagraphView(
                     paragraph = paragraph,
                     currentSentenceIndex = uiState.currentIndex,
-                    prebufferedIndices = if (uiState.settings.engineType == TtsEngineType.VIENEU_ON_DEVICE) {
+                    prebufferedIndices = if (uiState.settings.engineType == TtsEngineType.VIENEU_ON_DEVICE ||
+                        uiState.settings.engineType == TtsEngineType.PIPER_ON_DEVICE
+                    ) {
                         uiState.prebufferedIndices
                     } else {
                         emptySet()
@@ -429,6 +457,8 @@ fun ReaderScreen(
             availableSystemVoices = uiState.availableSystemVoices,
             vieneuStatus = uiState.vieneuModelStatus,
             downloadProgress = uiState.vieneuDownloadProgress,
+            piperStatus = uiState.piperModelStatus,
+            piperDownloadProgress = uiState.piperDownloadProgress,
             onSpeechRateChange = onSpeechRateChange,
             onPitchChange = onPitchChange,
             onSentencePauseChange = onSentencePauseChange,
@@ -441,8 +471,10 @@ fun ReaderScreen(
             onSystemVoiceSelected = onSystemVoiceSelected,
             onEngineTypeSelected = onEngineTypeSelected,
             onVieNeuVoiceSelected = onVieNeuVoiceSelected,
+            onPiperVoiceSelected = onPiperVoiceSelected,
             onLookaheadBufferSizeChange = onLookaheadBufferSizeChange,
             onDownloadVieNeuModel = onDownloadVieNeuModel,
+            onDownloadPiperModel = onDownloadPiperModel,
             onDismissRequest = { showSettingsSheet = false }
         )
     }
@@ -572,12 +604,14 @@ private fun AtReaderBottomConsole(
     onDecreaseFontSize: () -> Unit,
     onReadingThemeChange: (ReadingTheme) -> Unit,
     onEngineTypeSelected: (TtsEngineType) -> Unit,
+    onPiperVoiceSelected: (String) -> Unit,
     onOpenFullSettings: () -> Unit
 ) {
     val totalSentences = uiState.sentences.size
     val currentIndex = uiState.currentIndex
     val settings = uiState.settings
     val isVieNeu = settings.engineType == TtsEngineType.VIENEU_ON_DEVICE
+    val isPiper = settings.engineType == TtsEngineType.PIPER_ON_DEVICE
 
     var isDraggingSlider by remember { mutableStateOf(false) }
     var sliderPosition by remember(currentIndex) { mutableFloatStateOf(currentIndex.toFloat()) }
@@ -605,7 +639,7 @@ private fun AtReaderBottomConsole(
                         .background(palette.drawerBg)
                         .padding(horizontal = 14.dp, vertical = 10.dp)
                 ) {
-                    // Hàng đầu: Chuyển nhanh Giọng Hệ Thống / VieNeu AI + Nút Mặc định + Đóng khay
+                    // Hàng đầu: Chuyển nhanh Giọng Hệ Thống / Piper 73 Giọng / VieNeu AI + Nút Mặc định + Đóng khay
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -614,12 +648,19 @@ private fun AtReaderBottomConsole(
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.horizontalScroll(rememberScrollState())
+                            modifier = Modifier
+                                .weight(1f)
+                                .horizontalScroll(rememberScrollState())
                         ) {
                             FilterChip(
-                                selected = !isVieNeu,
+                                selected = settings.engineType == TtsEngineType.NATIVE_SYSTEM,
                                 onClick = { onEngineTypeSelected(TtsEngineType.NATIVE_SYSTEM) },
                                 label = { Text("Hệ thống", fontSize = 12.sp) }
+                            )
+                            FilterChip(
+                                selected = isPiper,
+                                onClick = { onEngineTypeSelected(TtsEngineType.PIPER_ON_DEVICE) },
+                                label = { Text("Piper (73 giọng)", fontSize = 12.sp) }
                             )
                             FilterChip(
                                 selected = isVieNeu,
@@ -637,7 +678,7 @@ private fun AtReaderBottomConsole(
                                             modifier = Modifier.size(13.dp)
                                         )
                                         Spacer(modifier = Modifier.width(3.dp))
-                                        Text("Giọng ấm", fontSize = 12.sp)
+                                        Text("Chống chói", fontSize = 12.sp)
                                     }
                                 }
                             )
@@ -665,6 +706,34 @@ private fun AtReaderBottomConsole(
                                     Icons.Default.KeyboardArrowDown,
                                     contentDescription = "Thu gọn",
                                     tint = palette.textSecondary
+                                )
+                            }
+                        }
+                    }
+
+                    // Nếu đang chọn Piper (73 giọng), hiển thị thanh chọn nhanh giọng HD + VIVOS ngay trong khay
+                    if (isPiper) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                        ) {
+                            PiperConstants.HD_PRESET_VOICES.forEach { profile ->
+                                FilterChip(
+                                    selected = settings.selectedPiperVoice == profile.id,
+                                    onClick = { onPiperVoiceSelected(profile.id) },
+                                    label = { Text(profile.name, fontSize = 11.sp) }
+                                )
+                            }
+                            listOf(0, 2, 5, 11, 18, 24, 32, 45, 64).forEach { sid ->
+                                val vid = "vivos_$sid"
+                                val label = "VIVOS #${String.format(Locale.US, "%02d", sid + 1)}"
+                                FilterChip(
+                                    selected = settings.selectedPiperVoice == vid,
+                                    onClick = { onPiperVoiceSelected(vid) },
+                                    label = { Text(label, fontSize = 11.sp) }
                                 )
                             }
                         }
@@ -807,7 +876,40 @@ private fun AtReaderBottomConsole(
                         color = palette.textSecondary
                     )
 
-                    if (isVieNeu) {
+                    if (isPiper) {
+                        val activeStatus = uiState.piperModelStatus
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Memory,
+                                contentDescription = null,
+                                modifier = Modifier.size(11.dp),
+                                tint = if (uiState.isSynthesizing || activeStatus != VieNeuModelStatus.READY) {
+                                    palette.accentColor
+                                } else {
+                                    Color(0xFF2E7D32)
+                                }
+                            )
+                            val statusText = when {
+                                activeStatus == VieNeuModelStatus.DOWNLOADING ->
+                                    " Tải Piper ${(uiState.piperDownloadProgress * 100).toInt()}%"
+                                activeStatus != VieNeuModelStatus.READY ->
+                                    " Chưa tải model Piper"
+                                uiState.isSynthesizing ->
+                                    " Đang gen Piper..."
+                                else ->
+                                    " Đệm: ${uiState.prebufferedIndices.size} câu"
+                            }
+                            Text(
+                                text = statusText,
+                                fontSize = 11.sp,
+                                color = if (uiState.isSynthesizing || activeStatus != VieNeuModelStatus.READY) {
+                                    palette.accentColor
+                                } else {
+                                    Color(0xFF2E7D32)
+                                }
+                            )
+                        }
+                    } else if (isVieNeu) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = Icons.Default.Memory,

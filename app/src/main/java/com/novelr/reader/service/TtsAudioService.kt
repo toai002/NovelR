@@ -251,10 +251,10 @@ class TtsAudioService : Service() {
         val displayIndex = if (total > 0) (currentIndex + 1).coerceAtMost(total) else 0
         val currentSentence = ttsManager.sentences.value.getOrNull(currentIndex) ?: "NovelR - Đọc Sách TTS"
         val rawTitle = ttsManager.bookTitle.value.ifBlank { "NovelR AudioBook" }
-        val engineLabel = if (ttsManager.settings.value.engineType == TtsEngineType.VIENEU_ON_DEVICE) {
-            "VieNeu AI • Câu $displayIndex/$total"
-        } else {
-            "Hệ thống • Câu $displayIndex/$total"
+        val engineLabel = when (ttsManager.settings.value.engineType) {
+            TtsEngineType.PIPER_ON_DEVICE -> "Piper Rõ Chữ • Câu $displayIndex/$total"
+            TtsEngineType.VIENEU_ON_DEVICE -> "VieNeu AI • Câu $displayIndex/$total"
+            TtsEngineType.NATIVE_SYSTEM -> "Hệ thống • Câu $displayIndex/$total"
         }
 
         val metadata = MediaMetadataCompat.Builder()

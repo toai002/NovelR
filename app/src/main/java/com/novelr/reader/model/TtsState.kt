@@ -11,11 +11,12 @@ enum class PlaybackStatus {
 
 enum class TtsEngineType {
     NATIVE_SYSTEM,      // Hệ thống Android TTS (Google, Samsung...)
-    VIENEU_ON_DEVICE    // VieNeu-TTS v3 Nano AI chạy ONNX On-Device offline
+    PIPER_ON_DEVICE,    // Piper VITS Offline (73 giọng đa dạng: 8 giọng HD rõ chữ + 65 giọng VIVOS, siêu nhanh ~100ms)
+    VIENEU_ON_DEVICE    // VieNeu-TTS v3 Nano AI chạy ONNX On-Device offline (Truyền cảm)
 }
 
 enum class VieNeuModelStatus {
-    NOT_DOWNLOADED,     // Chưa tải model về máy (~256 MB trên HuggingFace)
+    NOT_DOWNLOADED,     // Chưa tải model về máy
     DOWNLOADING,        // Đang tải weights ONNX
     READY,              // Đã sẵn sàng chạy offline
     ERROR               // Lỗi nạp hoặc tải model
@@ -52,6 +53,7 @@ data class TtsSettings(
     val selectedSystemVoice: String? = null,
     val engineType: TtsEngineType = TtsEngineType.NATIVE_SYSTEM,
     val selectedVieNeuVoice: String = DEFAULT_VIENEU_VOICE,
+    val selectedPiperVoice: String = DEFAULT_PIPER_VOICE,
     val lookaheadBufferSize: Int = DEFAULT_LOOKAHEAD,
     val sentencePauseMs: Int = DEFAULT_SENTENCE_PAUSE_MS,
     val clausePauseMs: Int = DEFAULT_CLAUSE_PAUSE_MS,
@@ -62,6 +64,7 @@ data class TtsSettings(
         const val DEFAULT_SPEECH_RATE = 1.0f
         const val DEFAULT_PITCH = 1.0f
         const val DEFAULT_VIENEU_VOICE = "duc_tri"
+        const val DEFAULT_PIPER_VOICE = "vais_default"
         const val DEFAULT_LOOKAHEAD = 2
         const val DEFAULT_SENTENCE_PAUSE_MS = 550
         const val DEFAULT_CLAUSE_PAUSE_MS = 240
@@ -72,6 +75,7 @@ data class TtsSettings(
         get() = speechRate == DEFAULT_SPEECH_RATE &&
                 pitch == DEFAULT_PITCH &&
                 selectedVieNeuVoice == DEFAULT_VIENEU_VOICE &&
+                selectedPiperVoice == DEFAULT_PIPER_VOICE &&
                 selectedSystemVoice == null &&
                 lookaheadBufferSize == DEFAULT_LOOKAHEAD &&
                 sentencePauseMs == DEFAULT_SENTENCE_PAUSE_MS &&
@@ -86,6 +90,7 @@ data class TtsSettings(
         speechRate = DEFAULT_SPEECH_RATE,
         pitch = DEFAULT_PITCH,
         selectedVieNeuVoice = DEFAULT_VIENEU_VOICE,
+        selectedPiperVoice = DEFAULT_PIPER_VOICE,
         selectedSystemVoice = null,
         lookaheadBufferSize = DEFAULT_LOOKAHEAD,
         sentencePauseMs = DEFAULT_SENTENCE_PAUSE_MS,
@@ -112,6 +117,11 @@ data class ReaderUiState(
     // VieNeu AI On-Device States
     val vieneuModelStatus: VieNeuModelStatus = VieNeuModelStatus.NOT_DOWNLOADED,
     val vieneuDownloadProgress: Float = 0f,
+
+    // Piper VITS Multi-Voice Offline States
+    val piperModelStatus: VieNeuModelStatus = VieNeuModelStatus.NOT_DOWNLOADED,
+    val piperDownloadProgress: Float = 0f,
+
     val prebufferedIndices: Set<Int> = emptySet(), // Tập hợp các chỉ số câu đã nạp sẵn vào RAM
     val isSynthesizing: Boolean = false            // Đang tính toán suy luận ONNX
 )

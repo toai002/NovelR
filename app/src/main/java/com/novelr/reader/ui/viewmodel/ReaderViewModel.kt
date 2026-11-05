@@ -110,6 +110,19 @@ class ReaderViewModel : ViewModel() {
             }
         }.launchIn(viewModelScope)
 
+        // Nhóm 4: Trạng thái Piper VITS Multi-Voice Offline (73 Giọng Rõ Chữ)
+        observerJobs += combine(
+            manager.piperEngine.modelStatus,
+            manager.piperEngine.downloadProgress
+        ) { piperStatus, piperProgress ->
+            _uiState.update { current ->
+                current.copy(
+                    piperModelStatus = piperStatus,
+                    piperDownloadProgress = piperProgress
+                )
+            }
+        }.launchIn(viewModelScope)
+
         // Khôi phục bài đọc gần nhất (hoặc văn bản hướng dẫn mẫu) giống @Voice Aloud Reader
         if (manager.sentences.value.isEmpty()) {
             restoreOrInitDefaultBook(service.applicationContext, manager)
@@ -311,6 +324,11 @@ class ReaderViewModel : ViewModel() {
         ttsManager?.updateSettings(newSettings)
     }
 
+    fun selectPiperVoice(voiceId: String) {
+        val newSettings = _uiState.value.settings.copy(selectedPiperVoice = voiceId)
+        ttsManager?.updateSettings(newSettings)
+    }
+
     fun updateLookaheadBuffer(bufferSize: Int) {
         val newSettings = _uiState.value.settings.copy(lookaheadBufferSize = bufferSize)
         ttsManager?.updateSettings(newSettings)
@@ -318,5 +336,9 @@ class ReaderViewModel : ViewModel() {
 
     fun downloadVieNeuModel() {
         ttsManager?.downloadVieNeuModel()
+    }
+
+    fun downloadPiperModel() {
+        ttsManager?.downloadPiperModel()
     }
 }

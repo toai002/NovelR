@@ -13,6 +13,7 @@ import com.novelr.reader.model.SystemVoiceInfo
 import com.novelr.reader.model.TtsEngineType
 import com.novelr.reader.model.TtsSettings
 import com.novelr.reader.model.VieNeuModelStatus
+import com.novelr.reader.service.piper.PiperEngine
 import com.novelr.reader.service.vieneu.VieNeuAudioPlayer
 import com.novelr.reader.service.vieneu.VieNeuEngine
 import com.novelr.reader.service.vieneu.VieNeuPreBufferQueue
@@ -62,8 +63,12 @@ class TtsManager(
 
     // --- VieNeu AI On-Device Engine (v3 Nano ONNX 24kHz) ---
     val vieneuEngine = VieNeuEngine(context)
+
+    // --- Piper VITS Multi-Voice Offline Engine (73 Giọng Rõ Chữ) ---
+    val piperEngine = PiperEngine(context)
+
     private val vieneuAudioPlayer = VieNeuAudioPlayer(scope, sharedAudioSessionId)
-    val vieneuPreBufferQueue = VieNeuPreBufferQueue(vieneuEngine, scope)
+    val vieneuPreBufferQueue = VieNeuPreBufferQueue(vieneuEngine, piperEngine, scope)
 
     private val _playbackStatus = MutableStateFlow(PlaybackStatus.IDLE)
     val playbackStatus: StateFlow<PlaybackStatus> = _playbackStatus.asStateFlow()
@@ -101,6 +106,16 @@ class TtsManager(
     init {
         initializeNativeTts(enginePackage = _settings.value.enginePackage)
 
+        // Giải phóng RAM của bộ máy không được chọn khi mới mở app
+        when (_settings.value.engineType) {
+            TtsEngineType.PIPER_ON_DEVICE -> vieneuEngine.unloadSessions()
+            TtsEngineType.VIENEU_ON_DEVICE -> piperEngine.unloadSessions()
+            TtsEngineType.NATIVE_SYSTEM -> {
+                vieneuEngine.unloadSessions()
+                piperEngine.unloadSessions()
+            }
+        }
+
         // Khi model VieNeu-TTS v3 Nano vừa tải xong, tự động kích hoạt prefetch các câu tiếp theo vào RAM
         scope.launch {
             vieneuEngine.modelStatus.collect { status ->
@@ -115,6 +130,35 @@ class TtsManager(
                     )
                 }
             }
+        }
+
+        // Khi model Piper VITS vừa tải xong, tự động kích hoạt prefetch các câu tiếp theo vào RAM
+        scope.launch {
+            piperEngine.modelStatus.collect { status ->
+                if (status == VieNeuModelStatus.READY &&
+                    _settings.value.engineType == TtsEngineType.PIPER_ON_DEVICE &&
+                    _sentences.value.isNotEmpty()
+                ) {
+                    vieneuPreBufferQueue.triggerPrefetch(
+                        startIndex = _currentIndex.value,
+                        sentences = _sentences.value,
+                        settings = _settings.value
+                    )
+                }
+            }
+        }
+    }
+
+    private fun isOnDeviceNeuralEngineActive(settings: TtsSettings = _settings.value): Boolean {
+        return settings.engineType == TtsEngineType.VIENEU_ON_DEVICE ||
+                settings.engineType == TtsEngineType.PIPER_ON_DEVICE
+    }
+
+    private fun isActiveNeuralModelReady(settings: TtsSettings = _settings.value): Boolean {
+        return when (settings.engineType) {
+            TtsEngineType.VIENEU_ON_DEVICE -> vieneuEngine.modelStatus.value == VieNeuModelStatus.READY
+            TtsEngineType.PIPER_ON_DEVICE -> piperEngine.modelStatus.value == VieNeuModelStatus.READY
+            TtsEngineType.NATIVE_SYSTEM -> false
         }
     }
 
@@ -148,7 +192,7 @@ class TtsManager(
 
         val langResult = tts.setLanguage(vietnameseLocale)
         if (langResult == TextToSpeech.LANG_MISSING_DATA || langResult == TextToSpeech.LANG_NOT_SUPPORTED) {
-            val warn = "Thiếu gói ngôn ngữ Tiếng Việt (vi-VN) trên máy. Bạn có thể chuyển sang VieNeu AI On-Device."
+            val warn = "Thiếu gói ngôn ngữ Tiếng Việt (vi-VN) trên máy. Bạn có thể chuyển sang Piper Rõ Chữ hoặc VieNeu AI."
             Log.w(TAG, warn)
             _errorMessage.value = warn
             tts.language = Locale.getDefault()
@@ -279,8 +323,8 @@ class TtsManager(
         _sentences.value = newSentences
         _currentIndex.value = startIndex.coerceIn(0, (newSentences.size - 1).coerceAtLeast(0))
 
-        if (_settings.value.engineType == TtsEngineType.VIENEU_ON_DEVICE &&
-            vieneuEngine.modelStatus.value == VieNeuModelStatus.READY &&
+        if (isOnDeviceNeuralEngineActive() &&
+            isActiveNeuralModelReady() &&
             newSentences.isNotEmpty()
         ) {
             vieneuPreBufferQueue.triggerPrefetch(
@@ -303,8 +347,8 @@ class TtsManager(
             _currentIndex.value = 0
         }
 
-        if (_settings.value.engineType == TtsEngineType.VIENEU_ON_DEVICE &&
-            vieneuEngine.modelStatus.value == VieNeuModelStatus.READY &&
+        if (isOnDeviceNeuralEngineActive() &&
+            isActiveNeuralModelReady() &&
             _playbackStatus.value == PlaybackStatus.PAUSED &&
             vieneuAudioPlayer.isPausedMidSentence()
         ) {
@@ -374,9 +418,7 @@ class TtsManager(
 
         if (_playbackStatus.value == PlaybackStatus.PLAYING) {
             speakSentence(clamped)
-        } else if (_settings.value.engineType == TtsEngineType.VIENEU_ON_DEVICE &&
-            vieneuEngine.modelStatus.value == VieNeuModelStatus.READY
-        ) {
+        } else if (isOnDeviceNeuralEngineActive() && isActiveNeuralModelReady()) {
             vieneuPreBufferQueue.triggerPrefetch(clamped, list, _settings.value)
         }
     }
@@ -385,17 +427,30 @@ class TtsManager(
         val list = _sentences.value
         if (index !in list.indices) return
 
-        if (_settings.value.engineType == TtsEngineType.VIENEU_ON_DEVICE) {
-            if (vieneuEngine.modelStatus.value == VieNeuModelStatus.READY) {
-                speakWithVieNeu(index)
-            } else {
-                if (vieneuEngine.modelStatus.value == VieNeuModelStatus.NOT_DOWNLOADED) {
-                    downloadVieNeuModel()
+        when (_settings.value.engineType) {
+            TtsEngineType.VIENEU_ON_DEVICE -> {
+                if (vieneuEngine.modelStatus.value == VieNeuModelStatus.READY) {
+                    speakWithOnDeviceNeural(index)
+                } else {
+                    if (vieneuEngine.modelStatus.value == VieNeuModelStatus.NOT_DOWNLOADED) {
+                        downloadVieNeuModel()
+                    }
+                    speakWithNativeTts(index)
                 }
+            }
+            TtsEngineType.PIPER_ON_DEVICE -> {
+                if (piperEngine.modelStatus.value == VieNeuModelStatus.READY) {
+                    speakWithOnDeviceNeural(index)
+                } else {
+                    if (piperEngine.modelStatus.value == VieNeuModelStatus.NOT_DOWNLOADED) {
+                        downloadPiperModel()
+                    }
+                    speakWithNativeTts(index)
+                }
+            }
+            TtsEngineType.NATIVE_SYSTEM -> {
                 speakWithNativeTts(index)
             }
-        } else {
-            speakWithNativeTts(index)
         }
     }
 
@@ -417,7 +472,7 @@ class TtsManager(
         tts.speak(sentenceToRead, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
     }
 
-    private fun speakWithVieNeu(index: Int) {
+    private fun speakWithOnDeviceNeural(index: Int) {
         vieneuSynthesisJob?.cancel()
         val list = _sentences.value
         if (index !in list.indices) return
@@ -501,6 +556,7 @@ class TtsManager(
 
         val engineTypeChanged = oldSettings.engineType != newSettings.engineType
         val audioParamsChanged = oldSettings.selectedVieNeuVoice != newSettings.selectedVieNeuVoice ||
+                oldSettings.selectedPiperVoice != newSettings.selectedPiperVoice ||
                 oldSettings.selectedSystemVoice != newSettings.selectedSystemVoice ||
                 oldSettings.speechRate != newSettings.speechRate ||
                 oldSettings.pitch != newSettings.pitch ||
@@ -512,30 +568,43 @@ class TtsManager(
             vieneuSynthesisJob?.cancel()
             vieneuAudioPlayer.stop()
             textToSpeech?.stop()
+            vieneuPreBufferQueue.clearCache()
 
-            if (newSettings.engineType == TtsEngineType.VIENEU_ON_DEVICE &&
-                vieneuEngine.modelStatus.value == VieNeuModelStatus.NOT_DOWNLOADED
-            ) {
-                downloadVieNeuModel()
+            // Giải phóng ngay RAM ONNX của bộ máy không sử dụng (Zero Dual-RAM Overhead)
+            when (newSettings.engineType) {
+                TtsEngineType.PIPER_ON_DEVICE -> {
+                    vieneuEngine.unloadSessions()
+                    if (piperEngine.modelStatus.value == VieNeuModelStatus.NOT_DOWNLOADED) {
+                        downloadPiperModel()
+                    }
+                }
+                TtsEngineType.VIENEU_ON_DEVICE -> {
+                    piperEngine.unloadSessions()
+                    if (vieneuEngine.modelStatus.value == VieNeuModelStatus.NOT_DOWNLOADED) {
+                        downloadVieNeuModel()
+                    }
+                }
+                TtsEngineType.NATIVE_SYSTEM -> {
+                    vieneuEngine.unloadSessions()
+                    piperEngine.unloadSessions()
+                }
             }
 
             if (wasPlaying) {
                 _playbackStatus.value = PlaybackStatus.PLAYING
                 speakSentence(_currentIndex.value)
-            } else if (newSettings.engineType == TtsEngineType.VIENEU_ON_DEVICE &&
-                vieneuEngine.modelStatus.value == VieNeuModelStatus.READY
-            ) {
+            } else if (isOnDeviceNeuralEngineActive(newSettings) && isActiveNeuralModelReady(newSettings)) {
                 vieneuPreBufferQueue.triggerPrefetch(_currentIndex.value, _sentences.value, newSettings)
             }
             return
         }
 
-        if (newSettings.engineType == TtsEngineType.VIENEU_ON_DEVICE) {
+        if (isOnDeviceNeuralEngineActive(newSettings)) {
             if (audioParamsChanged) {
                 vieneuPreBufferQueue.clearCache()
                 if (wasPlaying) {
                     speakSentence(_currentIndex.value)
-                } else if (vieneuEngine.modelStatus.value == VieNeuModelStatus.READY) {
+                } else if (isActiveNeuralModelReady(newSettings)) {
                     vieneuPreBufferQueue.triggerPrefetch(_currentIndex.value, _sentences.value, newSettings)
                 }
             } else if (oldSettings.lookaheadBufferSize != newSettings.lookaheadBufferSize) {
@@ -563,8 +632,14 @@ class TtsManager(
         }
     }
 
+    fun downloadPiperModel() {
+        scope.launch {
+            piperEngine.downloadModelWeights()
+        }
+    }
+
     /**
-     * Áp dụng tốc độ, cao độ làm ấm (0.92x khi bật Warm Filter) và chọn giọng Nam trầm / Nữ dịu của Hệ thống.
+     * Áp dụng tốc độ, cao độ chuẩn 1.0x và chọn giọng Nam trầm / Nữ dịu của Hệ thống.
      */
     private fun applySettingsToNative(tts: TextToSpeech, settings: TtsSettings) {
         try {
@@ -572,7 +647,6 @@ class TtsManager(
             val targetVoice: Voice? = if (!settings.selectedSystemVoice.isNullOrBlank()) {
                 allVoices.find { it.name == settings.selectedSystemVoice }
             } else if (settings.warmVoiceFilter) {
-                // Tự động chọn giọng Nam trầm ấm hoặc Nữ dịu của Google TTS thay vì giọng mặc định đanh chói
                 PREFERRED_WARM_VOICE_KEYWORDS.firstNotNullOfOrNull { keyword ->
                     allVoices.find { v ->
                         v.locale?.language?.startsWith("vi", ignoreCase = true) == true &&
@@ -591,8 +665,6 @@ class TtsManager(
         }
 
         tts.setSpeechRate(settings.speechRate)
-        // Giữ nguyên 100% cao độ (Pitch) chuẩn của giọng đọc, tuyệt đối không trừ pitch
-        // để giữ độ tự nhiên của thanh điệu tiếng Việt và tránh hiện tượng méo tiếng vocoder.
         tts.setPitch(settings.pitch.coerceIn(0.5f, 1.5f))
         warmAudioDsp.setEnabled(settings.warmVoiceFilter)
     }
@@ -606,5 +678,6 @@ class TtsManager(
         warmAudioDsp.release()
         vieneuAudioPlayer.release()
         vieneuEngine.release()
+        piperEngine.release()
     }
 }

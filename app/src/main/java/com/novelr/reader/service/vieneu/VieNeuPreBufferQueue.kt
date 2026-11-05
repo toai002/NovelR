@@ -1,8 +1,10 @@
 package com.novelr.reader.service.vieneu
 
 import android.util.Log
+import com.novelr.reader.model.TtsEngineType
 import com.novelr.reader.model.TtsSettings
 import com.novelr.reader.model.VieNeuModelStatus
+import com.novelr.reader.service.piper.PiperEngine
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,16 +19,18 @@ import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Hàng đợi đệm trước (Pre-Buffering Lookahead Queue) kết hợp Streaming theo mệnh đề cho VieNeu-TTS.
+ * Hàng đợi đệm trước (Pre-Buffering Lookahead Queue) kết hợp Streaming theo mệnh đề
+ * dùng chung cho cả **Piper VITS Multi-Voice** và **VieNeu-TTS**.
  *
  * Tối ưu hóa:
  * - **Fast-path 0ms**: Nếu câu đã được render trước trong RAM, trả về ngay lập tức.
- * - **Clause-Level Streaming**: Nếu câu dài chưa có trong cache, vừa phát mệnh đề đầu tiên sau ~0.5–0.8s
+ * - **Clause-Level Streaming**: Nếu câu dài chưa có trong cache, vừa phát mệnh đề đầu tiên
  *   vừa tiếp tục tổng hợp các mệnh đề còn lại và lưu toàn bộ câu vào RAM.
  * - **Priority Preemption**: Hủy ngay các tác vụ prefetch ngầm nếu người dùng nhảy câu (Seek).
  */
 class VieNeuPreBufferQueue(
-    private val engine: VieNeuEngine,
+    private val vieneuEngine: VieNeuEngine,
+    private val piperEngine: PiperEngine,
     private val scope: CoroutineScope
 ) {
     companion object {
@@ -88,16 +92,29 @@ class VieNeuPreBufferQueue(
                     onClauseReady(cached)
                 } ?: run {
                     val text = sentences.getOrNull(index) ?: return@run ShortArray(0)
-                    val synthesized = engine.synthesizeStreaming(
-                        text = text,
-                        voiceId = settings.selectedVieNeuVoice,
-                        speed = settings.speechRate,
-                        pitch = settings.pitch,
-                        sentencePauseMs = settings.sentencePauseMs,
-                        clausePauseMs = settings.clausePauseMs,
-                        warmVoiceFilter = settings.warmVoiceFilter,
-                        onClauseReady = onClauseReady
-                    )
+                    val synthesized = if (settings.engineType == TtsEngineType.PIPER_ON_DEVICE) {
+                        piperEngine.synthesizeStreaming(
+                            text = text,
+                            voiceId = settings.selectedPiperVoice,
+                            speed = settings.speechRate,
+                            pitch = settings.pitch,
+                            sentencePauseMs = settings.sentencePauseMs,
+                            clausePauseMs = settings.clausePauseMs,
+                            warmVoiceFilter = settings.warmVoiceFilter,
+                            onClauseReady = onClauseReady
+                        )
+                    } else {
+                        vieneuEngine.synthesizeStreaming(
+                            text = text,
+                            voiceId = settings.selectedVieNeuVoice,
+                            speed = settings.speechRate,
+                            pitch = settings.pitch,
+                            sentencePauseMs = settings.sentencePauseMs,
+                            clausePauseMs = settings.clausePauseMs,
+                            warmVoiceFilter = settings.warmVoiceFilter,
+                            onClauseReady = onClauseReady
+                        )
+                    }
                     if (synthesized.isNotEmpty()) {
                         audioCache[index] = synthesized
                         updateBufferedIndices()
@@ -135,7 +152,13 @@ class VieNeuPreBufferQueue(
     ) {
         currentPrefetchJob?.cancel()
         if (sentences.isEmpty() || startIndex >= sentences.size) return
-        if (engine.modelStatus.value != VieNeuModelStatus.READY) return
+
+        val isEngineReady = when (settings.engineType) {
+            TtsEngineType.PIPER_ON_DEVICE -> piperEngine.modelStatus.value == VieNeuModelStatus.READY
+            TtsEngineType.VIENEU_ON_DEVICE -> vieneuEngine.modelStatus.value == VieNeuModelStatus.READY
+            TtsEngineType.NATIVE_SYSTEM -> false
+        }
+        if (!isEngineReady) return
 
         currentPrefetchJob = scope.launch(Dispatchers.Default) {
             val lookahead = settings.lookaheadBufferSize.coerceIn(1, 4)
@@ -149,15 +172,27 @@ class VieNeuPreBufferQueue(
                 try {
                     _isSynthesizing.value = true
                     val pcm = synthesisMutex.withLock {
-                        audioCache[idx] ?: engine.synthesize(
-                            text = sentence,
-                            voiceId = settings.selectedVieNeuVoice,
-                            speed = settings.speechRate,
-                            pitch = settings.pitch,
-                            sentencePauseMs = settings.sentencePauseMs,
-                            clausePauseMs = settings.clausePauseMs,
-                            warmVoiceFilter = settings.warmVoiceFilter
-                        )
+                        audioCache[idx] ?: if (settings.engineType == TtsEngineType.PIPER_ON_DEVICE) {
+                            piperEngine.synthesize(
+                                text = sentence,
+                                voiceId = settings.selectedPiperVoice,
+                                speed = settings.speechRate,
+                                pitch = settings.pitch,
+                                sentencePauseMs = settings.sentencePauseMs,
+                                clausePauseMs = settings.clausePauseMs,
+                                warmVoiceFilter = settings.warmVoiceFilter
+                            )
+                        } else {
+                            vieneuEngine.synthesize(
+                                text = sentence,
+                                voiceId = settings.selectedVieNeuVoice,
+                                speed = settings.speechRate,
+                                pitch = settings.pitch,
+                                sentencePauseMs = settings.sentencePauseMs,
+                                clausePauseMs = settings.clausePauseMs,
+                                warmVoiceFilter = settings.warmVoiceFilter
+                            )
+                        }
                     }
                     if (isActive && pcm.isNotEmpty()) {
                         audioCache[idx] = pcm

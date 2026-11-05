@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.RestartAlt
@@ -64,9 +65,12 @@ import com.novelr.reader.model.SystemVoiceInfo
 import com.novelr.reader.model.TtsEngineType
 import com.novelr.reader.model.TtsSettings
 import com.novelr.reader.model.VieNeuModelStatus
+import com.novelr.reader.service.piper.PiperConstants
+import com.novelr.reader.service.piper.PiperModelFamily
 import com.novelr.reader.service.vieneu.VieNeuConstants
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -77,6 +81,8 @@ fun SettingsSheet(
     availableSystemVoices: List<SystemVoiceInfo>,
     vieneuStatus: VieNeuModelStatus,
     downloadProgress: Float,
+    piperStatus: VieNeuModelStatus,
+    piperDownloadProgress: Float,
     onSpeechRateChange: (Float) -> Unit,
     onPitchChange: (Float) -> Unit,
     onSentencePauseChange: (Int) -> Unit,
@@ -89,8 +95,10 @@ fun SettingsSheet(
     onSystemVoiceSelected: (String?) -> Unit,
     onEngineTypeSelected: (TtsEngineType) -> Unit,
     onVieNeuVoiceSelected: (String) -> Unit,
+    onPiperVoiceSelected: (String) -> Unit,
     onLookaheadBufferSizeChange: (Int) -> Unit,
     onDownloadVieNeuModel: () -> Unit,
+    onDownloadPiperModel: () -> Unit,
     onDismissRequest: () -> Unit
 ) {
     var engineMenuExpanded by remember { mutableStateOf(false) }
@@ -161,31 +169,40 @@ fun SettingsSheet(
                 }
             }
 
-            // 2. CHỌN CÔNG NGHỆ GIỌNG ĐỌC & BỘ LỌC LÀM ẤM CHỐNG CHÓI TAI
+            // 2. CHỌN CÔNG NGHỆ GIỌNG ĐỌC (3 BỘ MÁY ĐỘC LẬP) & BỘ LỌC CHỐNG CHÓI DSP
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "Công nghệ tổng hợp giọng nói",
+                    text = "Công nghệ tổng hợp giọng nói (3 bộ máy)",
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary
                 )
 
                 SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                     SegmentedButton(
+                        selected = settings.engineType == TtsEngineType.PIPER_ON_DEVICE,
+                        onClick = { onEngineTypeSelected(TtsEngineType.PIPER_ON_DEVICE) },
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3),
+                        icon = { Icon(Icons.Default.GraphicEq, contentDescription = null) }
+                    ) {
+                        Text("Piper (73 giọng)", fontSize = 11.sp, maxLines = 1)
+                    }
+
+                    SegmentedButton(
                         selected = settings.engineType == TtsEngineType.VIENEU_ON_DEVICE,
                         onClick = { onEngineTypeSelected(TtsEngineType.VIENEU_ON_DEVICE) },
-                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3),
                         icon = { Icon(Icons.Default.Psychology, contentDescription = null) }
                     ) {
-                        Text("VieNeu AI (On-Device)")
+                        Text("VieNeu AI", fontSize = 11.sp, maxLines = 1)
                     }
 
                     SegmentedButton(
                         selected = settings.engineType == TtsEngineType.NATIVE_SYSTEM,
                         onClick = { onEngineTypeSelected(TtsEngineType.NATIVE_SYSTEM) },
-                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                        shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3),
                         icon = { Icon(Icons.Default.RecordVoiceOver, contentDescription = null) }
                     ) {
-                        Text("Hệ Thống")
+                        Text("Hệ Thống", fontSize = 11.sp, maxLines = 1)
                     }
                 }
 
@@ -230,258 +247,527 @@ fun SettingsSheet(
             }
 
             // 3. CẤU HÌNH GIỌNG THEO ENGINE
-            if (settings.engineType == TtsEngineType.VIENEU_ON_DEVICE) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "VieNeu-TTS v3 Nano (ONNX 24kHz)",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            when (vieneuStatus) {
-                                VieNeuModelStatus.READY -> {
-                                    Surface(
-                                        color = Color(0xFF2E7D32).copy(alpha = 0.15f),
-                                        shape = RoundedCornerShape(12.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(
-                                                Icons.Default.CheckCircle,
-                                                contentDescription = null,
-                                                tint = Color(0xFF2E7D32),
-                                                modifier = Modifier.size(13.dp)
-                                            )
-                                            Text(
-                                                text = " Sẵn sàng",
-                                                color = Color(0xFF2E7D32),
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-                                }
-                                VieNeuModelStatus.DOWNLOADING -> {
-                                    val downloadedMb = (downloadProgress * 256).toInt()
-                                    Text(
-                                        text = "$downloadedMb/256 MB (${(downloadProgress * 100).toInt()}%)",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                                VieNeuModelStatus.ERROR -> {
-                                    Text(
-                                        text = "Cần tải lại",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.error,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                                else -> {}
-                            }
-                        }
-
-                        if (vieneuStatus == VieNeuModelStatus.NOT_DOWNLOADED || vieneuStatus == VieNeuModelStatus.ERROR) {
-                            Text(
-                                text = "Tải gói 4 mô hình ONNX thật (~256MB) một lần duy nhất để đọc offline. Trong lúc tải, app vẫn đọc bình thường bằng giọng hệ thống.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.outline
-                            )
-                            Button(
-                                onClick = onDownloadVieNeuModel,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.CloudDownload, contentDescription = null)
-                                Text(
-                                    if (vieneuStatus == VieNeuModelStatus.ERROR) " Tải Tiếp Gói Giọng AI (~256MB)"
-                                    else " Tải Gói Giọng Đọc AI (~256MB)"
-                                )
-                            }
-                        } else if (vieneuStatus == VieNeuModelStatus.DOWNLOADING) {
-                            LinearProgressIndicator(
-                                progress = { downloadProgress },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
+            when (settings.engineType) {
+                TtsEngineType.PIPER_ON_DEVICE -> {
+                    val activePiperProfile = remember(settings.selectedPiperVoice) {
+                        PiperConstants.findById(settings.selectedPiperVoice)
                     }
-                }
 
-                // Lưới 2 cột × 3 hàng cho 6 giọng đọc nhân vật VieNeu (gọn gàng, nhìn thấy toàn bộ ngay lập tức)
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(
+                    Card(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
                     ) {
-                        Text(
-                            text = "Giọng đọc nhân vật (6 giọng AI)",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = "Mặc định: Đức Trí",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.outline
-                        )
-                    }
-
-                    val voicePairs = VieNeuConstants.PRESET_VOICES.chunked(2)
-                    voicePairs.forEach { rowVoices ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            rowVoices.forEach { voice ->
-                                val isSelected = voice.id == settings.selectedVieNeuVoice
-                                OutlinedCard(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable { onVieNeuVoiceSelected(voice.id) },
-                                    border = if (isSelected) BorderStroke(
-                                        2.dp,
-                                        MaterialTheme.colorScheme.primary
-                                    ) else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                                    colors = CardDefaults.outlinedCardColors(
-                                        containerColor = if (isSelected) {
-                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-                                        } else {
-                                            MaterialTheme.colorScheme.surface
-                                        }
-                                    )
-                                ) {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(10.dp),
-                                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Piper VITS Rõ Chữ (73 Giọng Offline)",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                when (piperStatus) {
+                                    VieNeuModelStatus.READY -> {
+                                        Surface(
+                                            color = Color(0xFF2E7D32).copy(alpha = 0.15f),
+                                            shape = RoundedCornerShape(12.dp)
                                         ) {
-                                            Text(
-                                                text = voice.name,
-                                                fontWeight = FontWeight.Bold,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            if (isSelected) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
                                                 Icon(
                                                     Icons.Default.CheckCircle,
                                                     contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.size(16.dp)
+                                                    tint = Color(0xFF2E7D32),
+                                                    modifier = Modifier.size(13.dp)
+                                                )
+                                                Text(
+                                                    text = " Sẵn sàng (~100ms/câu)",
+                                                    color = Color(0xFF2E7D32),
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold
                                                 )
                                             }
                                         }
+                                    }
+                                    VieNeuModelStatus.DOWNLOADING -> {
+                                        val downloadedMb = (piperDownloadProgress * 91).toInt()
                                         Text(
-                                            text = voice.gender,
+                                            text = "$downloadedMb/91 MB (${(piperDownloadProgress * 100).toInt()}%)",
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.Bold
                                         )
+                                    }
+                                    VieNeuModelStatus.ERROR -> {
                                         Text(
-                                            text = voice.description.substringBefore(" (VieNeu"),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.outline,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis
+                                            text = "Cần tải lại",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.error,
+                                            fontWeight = FontWeight.Bold
                                         )
+                                    }
+                                    else -> {}
+                                }
+                            }
+
+                            if (piperStatus == VieNeuModelStatus.NOT_DOWNLOADED || piperStatus == VieNeuModelStatus.ERROR) {
+                                Text(
+                                    text = "Tải gói 2 mô hình Piper VITS (~91MB: VAIS-1000 HD + VIVOS 65 người đọc thật) để phát âm rõ từng chữ, tốc độ siêu nhanh ~100ms/câu.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                                Button(
+                                    onClick = onDownloadPiperModel,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.CloudDownload, contentDescription = null)
+                                    Text(
+                                        if (piperStatus == VieNeuModelStatus.ERROR) " Tải Tiếp Gói 73 Giọng Piper (~91MB)"
+                                        else " Tải Gói 73 Giọng Piper Rõ Chữ (~91MB)"
+                                    )
+                                }
+                            } else if (piperStatus == VieNeuModelStatus.DOWNLOADING) {
+                                LinearProgressIndicator(
+                                    progress = { piperDownloadProgress },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    }
+
+                    // NHÓM A: 8 GIỌNG HD PHÁT THANH VIÊN RÕ CHỮ (VAIS-1000)
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Nhóm 1: 8 Giọng HD Phát Thanh Viên (VAIS-1000)",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "Rõ chữ • 22kHz",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+
+                        val hdPairs = PiperConstants.HD_PRESET_VOICES.chunked(2)
+                        hdPairs.forEach { rowVoices ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                rowVoices.forEach { voice ->
+                                    val isSelected = voice.id == settings.selectedPiperVoice
+                                    OutlinedCard(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { onPiperVoiceSelected(voice.id) },
+                                        border = if (isSelected) BorderStroke(
+                                            2.dp,
+                                            MaterialTheme.colorScheme.primary
+                                        ) else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                        colors = CardDefaults.outlinedCardColors(
+                                            containerColor = if (isSelected) {
+                                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                                            } else {
+                                                MaterialTheme.colorScheme.surface
+                                            }
+                                        )
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(10.dp),
+                                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = voice.name,
+                                                    fontWeight = FontWeight.Bold,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                if (isSelected) {
+                                                    Icon(
+                                                        Icons.Default.CheckCircle,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                            Text(
+                                                text = voice.gender,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            Text(
+                                                text = voice.description,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.outline,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // NHÓM B: 65 GIỌNG NGƯỜI ĐỌC THẬT ĐA DẠNG (VIVOS #01 – #65)
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (activePiperProfile.family == PiperModelFamily.VIVOS_65) {
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                            }
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            val currentSpeakerNumber = if (activePiperProfile.family == PiperModelFamily.VIVOS_65) {
+                                activePiperProfile.speakerId + 1
+                            } else {
+                                1
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Nhóm 2: 65 Giọng Thật VIVOS (#01 – #65)",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = if (activePiperProfile.family == PiperModelFamily.VIVOS_65) {
+                                        "Đang chọn: Giọng #${String.format(Locale.US, "%02d", currentSpeakerNumber)}"
+                                    } else {
+                                        "Kéo thanh để chọn 1 trong 65 giọng"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+
+                            Text(
+                                text = "65 người đọc thật trong kho ngữ liệu VIVOS Tiếng Việt. Mỗi số là một âm sắc giọng độc lập, phát âm rõ chữ, không trộn lẫn.",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            Slider(
+                                value = currentSpeakerNumber.toFloat(),
+                                onValueChange = { value ->
+                                    val speakerIdx = (value.roundToInt() - 1).coerceIn(0, 64)
+                                    onPiperVoiceSelected("vivos_$speakerIdx")
+                                },
+                                valueRange = 1f..65f,
+                                steps = 63
+                            )
+
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                listOf(0, 2, 5, 11, 18, 24, 32, 41, 50, 64).forEach { sid ->
+                                    val vid = "vivos_$sid"
+                                    val label = "#${String.format(Locale.US, "%02d", sid + 1)}"
+                                    FilterChip(
+                                        selected = settings.selectedPiperVoice == vid,
+                                        onClick = { onPiperVoiceSelected(vid) },
+                                        label = { Text("VIVOS $label", fontSize = 11.sp) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                TtsEngineType.VIENEU_ON_DEVICE -> {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "VieNeu-TTS v3 Nano (ONNX 24kHz)",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                when (vieneuStatus) {
+                                    VieNeuModelStatus.READY -> {
+                                        Surface(
+                                            color = Color(0xFF2E7D32).copy(alpha = 0.15f),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.CheckCircle,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFF2E7D32),
+                                                    modifier = Modifier.size(13.dp)
+                                                )
+                                                Text(
+                                                    text = " Sẵn sàng",
+                                                    color = Color(0xFF2E7D32),
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
+                                    VieNeuModelStatus.DOWNLOADING -> {
+                                        val downloadedMb = (downloadProgress * 256).toInt()
+                                        Text(
+                                            text = "$downloadedMb/256 MB (${(downloadProgress * 100).toInt()}%)",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    VieNeuModelStatus.ERROR -> {
+                                        Text(
+                                            text = "Cần tải lại",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.error,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    else -> {}
+                                }
+                            }
+
+                            if (vieneuStatus == VieNeuModelStatus.NOT_DOWNLOADED || vieneuStatus == VieNeuModelStatus.ERROR) {
+                                Text(
+                                    text = "Tải gói 4 mô hình ONNX thật (~256MB) một lần duy nhất để đọc truyền cảm offline. Trong lúc tải, app vẫn đọc bình thường bằng giọng hệ thống.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                                Button(
+                                    onClick = onDownloadVieNeuModel,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.CloudDownload, contentDescription = null)
+                                    Text(
+                                        if (vieneuStatus == VieNeuModelStatus.ERROR) " Tải Tiếp Gói Giọng AI (~256MB)"
+                                        else " Tải Gói Giọng Đọc AI (~256MB)"
+                                    )
+                                }
+                            } else if (vieneuStatus == VieNeuModelStatus.DOWNLOADING) {
+                                LinearProgressIndicator(
+                                    progress = { downloadProgress },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    }
+
+                    // Lưới 2 cột × 3 hàng cho 6 giọng đọc nhân vật VieNeu
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Giọng đọc nhân vật (6 giọng AI truyền cảm)",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "Mặc định: Đức Trí",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+
+                        val voicePairs = VieNeuConstants.PRESET_VOICES.chunked(2)
+                        voicePairs.forEach { rowVoices ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                rowVoices.forEach { voice ->
+                                    val isSelected = voice.id == settings.selectedVieNeuVoice
+                                    OutlinedCard(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { onVieNeuVoiceSelected(voice.id) },
+                                        border = if (isSelected) BorderStroke(
+                                            2.dp,
+                                            MaterialTheme.colorScheme.primary
+                                        ) else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                        colors = CardDefaults.outlinedCardColors(
+                                            containerColor = if (isSelected) {
+                                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                                            } else {
+                                                MaterialTheme.colorScheme.surface
+                                            }
+                                        )
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(10.dp),
+                                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = voice.name,
+                                                    fontWeight = FontWeight.Bold,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                if (isSelected) {
+                                                    Icon(
+                                                        Icons.Default.CheckCircle,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                            Text(
+                                                text = voice.gender,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            Text(
+                                                text = voice.description.substringBefore(" (VieNeu"),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.outline,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
-            } else {
-                // Chọn biến thể Giọng Tiếng Việt Hệ thống (Nam trầm / Nữ dịu) + Engine Picker
-                if (availableSystemVoices.isNotEmpty()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(
-                            text = "Chọn âm sắc giọng Tiếng Việt Hệ thống",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
 
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            FilterChip(
-                                selected = settings.selectedSystemVoice == null,
-                                onClick = { onSystemVoiceSelected(null) },
-                                label = { Text("Tự động (Ưu tiên giọng ấm)", fontSize = 12.sp) }
+                TtsEngineType.NATIVE_SYSTEM -> {
+                    // Chọn biến thể Giọng Tiếng Việt Hệ thống (Nam trầm / Nữ dịu) + Engine Picker
+                    if (availableSystemVoices.isNotEmpty()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "Chọn âm sắc giọng Tiếng Việt Hệ thống",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary
                             )
-                            availableSystemVoices.take(8).forEach { voiceInfo ->
+
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
                                 FilterChip(
-                                    selected = settings.selectedSystemVoice == voiceInfo.name,
-                                    onClick = { onSystemVoiceSelected(voiceInfo.name) },
-                                    label = { Text(voiceInfo.label, fontSize = 12.sp) }
+                                    selected = settings.selectedSystemVoice == null,
+                                    onClick = { onSystemVoiceSelected(null) },
+                                    label = { Text("Tự động (Ưu tiên giọng ấm)", fontSize = 12.sp) }
                                 )
+                                availableSystemVoices.take(8).forEach { voiceInfo ->
+                                    FilterChip(
+                                        selected = settings.selectedSystemVoice == voiceInfo.name,
+                                        onClick = { onSystemVoiceSelected(voiceInfo.name) },
+                                        label = { Text(voiceInfo.label, fontSize = 12.sp) }
+                                    )
+                                }
                             }
                         }
                     }
-                }
 
-                // Lựa chọn System TTS Engine Picker
-                Column {
-                    Text(
-                        text = "Bộ máy TTS Hệ thống",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
+                    // Lựa chọn System TTS Engine Picker
+                    Column {
+                        Text(
+                            text = "Bộ máy TTS Hệ thống",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
 
-                    val selectedEngineLabel = availableEngines
-                        .find { it.packageName == settings.enginePackage }
-                        ?.label ?: "Mặc định hệ thống (Google / Xiaomi)"
+                        val selectedEngineLabel = availableEngines
+                            .find { it.packageName == settings.enginePackage }
+                            ?.label ?: "Mặc định hệ thống (Google / Xiaomi)"
 
-                    OutlinedCard(
-                        onClick = { engineMenuExpanded = true },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(14.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        OutlinedCard(
+                            onClick = { engineMenuExpanded = true },
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(text = selectedEngineLabel, style = MaterialTheme.typography.bodyMedium)
-                            Icon(Icons.Default.ArrowDropDown, contentDescription = null)
-                        }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(text = selectedEngineLabel, style = MaterialTheme.typography.bodyMedium)
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                            }
 
-                        DropdownMenu(
-                            expanded = engineMenuExpanded,
-                            onDismissRequest = { engineMenuExpanded = false }
-                        ) {
-                            availableEngines.forEach { engine ->
-                                DropdownMenuItem(
-                                    text = { Text(engine.label) },
-                                    onClick = {
-                                        onEngineSelected(engine.packageName)
-                                        engineMenuExpanded = false
-                                    }
-                                )
+                            DropdownMenu(
+                                expanded = engineMenuExpanded,
+                                onDismissRequest = { engineMenuExpanded = false }
+                            ) {
+                                availableEngines.forEach { engine ->
+                                    DropdownMenuItem(
+                                        text = { Text(engine.label) },
+                                        onClick = {
+                                            onEngineSelected(engine.packageName)
+                                            engineMenuExpanded = false
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -616,7 +902,9 @@ fun SettingsSheet(
                 )
             }
 
-            if (settings.engineType == TtsEngineType.VIENEU_ON_DEVICE) {
+            if (settings.engineType == TtsEngineType.VIENEU_ON_DEVICE ||
+                settings.engineType == TtsEngineType.PIPER_ON_DEVICE
+            ) {
                 Column {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
