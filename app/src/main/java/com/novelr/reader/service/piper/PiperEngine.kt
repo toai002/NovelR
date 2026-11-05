@@ -271,6 +271,7 @@ class PiperEngine(private val context: Context) {
         speed: Float,
         pitch: Float,
         sentencePauseMs: Int = 550,
+        clausePauseMs: Int = 200,
         warmVoiceFilter: Boolean = true
     ): ShortArray = withContext(Dispatchers.Default) {
         if (text.isBlank()) return@withContext ShortArray(0)
@@ -447,6 +448,36 @@ class PiperEngine(private val context: Context) {
             totalLength = totalLength,
             warmEnabled = warmVoiceFilter
         )
+    }
+
+    /**
+     * Tổng hợp câu hỗ trợ callback phát mệnh đề theo luồng (Streaming).
+     * Với Piper VITS, tốc độ suy luận nguyên câu chỉ ~80–120ms nên ta tổng hợp nguyên câu
+     * và gọi callback `onClauseReady` ngay lập tức để đồng bộ kiến trúc với VieNeu AI.
+     */
+    suspend fun synthesizeStreaming(
+        text: String,
+        voiceId: String,
+        speed: Float,
+        pitch: Float,
+        sentencePauseMs: Int = 550,
+        clausePauseMs: Int = 200,
+        warmVoiceFilter: Boolean = true,
+        onClauseReady: (ShortArray) -> Unit
+    ): ShortArray {
+        val pcm = synthesize(
+            text = text,
+            voiceId = voiceId,
+            speed = speed,
+            pitch = pitch,
+            sentencePauseMs = sentencePauseMs,
+            clausePauseMs = clausePauseMs,
+            warmVoiceFilter = warmVoiceFilter
+        )
+        if (pcm.isNotEmpty()) {
+            onClauseReady(pcm)
+        }
+        return pcm
     }
 
     fun release() {

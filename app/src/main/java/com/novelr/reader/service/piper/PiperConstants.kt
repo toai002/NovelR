@@ -1,10 +1,16 @@
 package com.novelr.reader.service.piper
 
+enum class PiperModelFamily {
+    VAIS_1000_HD,
+    VIVOS_65
+}
+
 data class PiperVoiceProfile(
     val id: String,
     val name: String,
     val gender: String,
     val description: String,
+    val family: PiperModelFamily = PiperModelFamily.VAIS_1000_HD,
     val isVivosMultiSpeaker: Boolean = false,
     val speakerId: Int = 0,
     val formantShift: Float = 1.0f,   // Hệ số dịch tần số formant tạo đa dạng âm sắc Nam/Nữ/Trầm/Thanh mà vẫn rõ chữ
@@ -15,13 +21,14 @@ data class PiperVoiceProfile(
 object PiperConstants {
     const val OUTPUT_SAMPLE_RATE = 24000
 
-    // 10 Giọng chuẩn HD (dựa trên VAIS-1000 Medium 22.05kHz - đầy đủ 154 token dấu thanh, đọc cực rõ chữ)
+    // 8 Giọng chuẩn HD (dựa trên VAIS-1000 Medium 22.05kHz - đầy đủ 154 token dấu thanh, đọc cực rõ chữ)
     val HD_PRESET_VOICES = listOf(
         PiperVoiceProfile(
             id = "vais_default",
             name = "Thanh Mai (Chuẩn HD)",
             gender = "Nữ • Bắc",
             description = "Phát thanh viên VAIS-1000 gốc • Đọc rõ từng chữ, chuẩn dấu 100%",
+            family = PiperModelFamily.VAIS_1000_HD,
             isVivosMultiSpeaker = false,
             formantShift = 1.0f,
             noiseScale = 0.55f,
@@ -32,6 +39,7 @@ object PiperConstants {
             name = "Thu Hà (Nữ Dịu Êm)",
             gender = "Nữ • Ấm",
             description = "Âm sắc ấm áp, tròn vành rõ chữ, nghe lâu không mỏi tai",
+            family = PiperModelFamily.VAIS_1000_HD,
             isVivosMultiSpeaker = false,
             formantShift = 0.94f,
             noiseScale = 0.52f,
@@ -42,6 +50,7 @@ object PiperConstants {
             name = "Minh Quân (Nam Kể Chuyện)",
             gender = "Nam • Trầm vừa",
             description = "Giọng nam điềm đạm, phát âm dứt khoát, hợp đọc tiểu thuyết dài",
+            family = PiperModelFamily.VAIS_1000_HD,
             isVivosMultiSpeaker = false,
             formantShift = 0.83f,
             noiseScale = 0.50f,
@@ -52,6 +61,7 @@ object PiperConstants {
             name = "Hoàng Sơn (Nam Trầm Sâu)",
             gender = "Nam • Trầm",
             description = "Giọng nam trầm dày, rõ chữ, hợp truyện tiên hiệp / kiếm hiệp / lịch sử",
+            family = PiperModelFamily.VAIS_1000_HD,
             isVivosMultiSpeaker = false,
             formantShift = 0.77f,
             noiseScale = 0.48f,
@@ -62,6 +72,7 @@ object PiperConstants {
             name = "Ngọc Ánh (Nữ Trong Trẻo)",
             gender = "Nữ • Thanh",
             description = "Giọng nữ trẻ trung, sáng rõ, tốc độ nhanh vẫn không dính chữ",
+            family = PiperModelFamily.VAIS_1000_HD,
             isVivosMultiSpeaker = false,
             formantShift = 1.06f,
             noiseScale = 0.55f,
@@ -72,6 +83,7 @@ object PiperConstants {
             name = "Tuấn Kiệt (Nam Phát Thanh)",
             gender = "Nam • Rõ nét",
             description = "Giọng nam trung tính, nhịp điệu đều đặn, chuẩn đọc sách kiến thức",
+            family = PiperModelFamily.VAIS_1000_HD,
             isVivosMultiSpeaker = false,
             formantShift = 0.86f,
             noiseScale = 0.45f,
@@ -82,6 +94,7 @@ object PiperConstants {
             name = "Lan Hương (Đọc Đêm Khuya)",
             gender = "Nữ • Trầm dịu",
             description = "Giọng đọc nhẹ nhàng, giảm độ gắt, tối ưu nghe trước khi ngủ",
+            family = PiperModelFamily.VAIS_1000_HD,
             isVivosMultiSpeaker = false,
             formantShift = 0.91f,
             noiseScale = 0.42f,
@@ -92,6 +105,7 @@ object PiperConstants {
             name = "Bác Ba (Lão Thành)",
             gender = "Nam • Lão niên",
             description = "Giọng trầm cổ điển, nhịp đọc khoan thai, rõ ràng",
+            family = PiperModelFamily.VAIS_1000_HD,
             isVivosMultiSpeaker = false,
             formantShift = 0.74f,
             noiseScale = 0.52f,
@@ -113,6 +127,7 @@ object PiperConstants {
                 name = "VIVOS #$numLabel",
                 gender = "Giọng #${spk + 1}/65",
                 description = "Giọng thu âm thực tế số ${spk + 1} trong bộ ngữ liệu VIVOS (65 người đọc)",
+                family = PiperModelFamily.VIVOS_65,
                 isVivosMultiSpeaker = true,
                 speakerId = spk,
                 formantShift = 1.0f,
@@ -123,4 +138,7 @@ object PiperConstants {
 
         return HD_PRESET_VOICES.first()
     }
+
+    fun findById(voiceId: String): PiperVoiceProfile = getVoiceProfile(voiceId)
+}
 }
