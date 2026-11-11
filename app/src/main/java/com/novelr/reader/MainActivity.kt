@@ -154,6 +154,7 @@ class MainActivity : ComponentActivity() {
                                 onEngineTypeSelected = viewModel::selectEngineType,
                                 onVieNeuVoiceSelected = viewModel::selectVieNeuVoice,
                                 onPiperVoiceSelected = viewModel::selectPiperVoice,
+                                onEdgeVoiceSelected = viewModel::selectEdgeVoice,
                                 onLookaheadBufferSizeChange = viewModel::updateLookaheadBuffer,
                                 onDownloadVieNeuModel = viewModel::downloadVieNeuModel,
                                 onDownloadPiperModel = viewModel::downloadPiperModel

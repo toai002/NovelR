@@ -354,6 +354,7 @@ class TtsAudioService : Service() {
         val currentSentence = ttsManager.sentences.value.getOrNull(currentIndex) ?: "NovelR - Đọc Sách TTS"
         val rawTitle = ttsManager.bookTitle.value.ifBlank { "NovelR AudioBook" }
         val engineLabel = when (ttsManager.settings.value.engineType) {
+            TtsEngineType.EDGE_ONLINE -> "Edge TTS • Câu $displayIndex/$total"
             TtsEngineType.PIPER_ON_DEVICE -> "Piper Rõ Chữ • Câu $displayIndex/$total"
             TtsEngineType.VIENEU_ON_DEVICE -> "VieNeu AI • Câu $displayIndex/$total"
             TtsEngineType.NATIVE_SYSTEM -> "Hệ thống • Câu $displayIndex/$total"

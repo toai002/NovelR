@@ -11,6 +11,7 @@ object ReaderPreferences {
     private const val KEY_ENGINE_TYPE = "engine_type"
     private const val KEY_VIENEU_VOICE = "vieneu_voice"
     private const val KEY_PIPER_VOICE = "piper_voice"
+    private const val KEY_EDGE_VOICE = "edge_voice"
     private const val KEY_SYSTEM_VOICE = "system_voice"
     private const val KEY_SPEECH_RATE = "speech_rate"
     private const val KEY_PITCH = "pitch"
@@ -48,6 +49,8 @@ object ReaderPreferences {
                 ?: TtsSettings.DEFAULT_VIENEU_VOICE,
             selectedPiperVoice = prefs.getString(KEY_PIPER_VOICE, TtsSettings.DEFAULT_PIPER_VOICE)
                 ?: TtsSettings.DEFAULT_PIPER_VOICE,
+            selectedEdgeVoice = prefs.getString(KEY_EDGE_VOICE, TtsSettings.DEFAULT_EDGE_VOICE)
+                ?: TtsSettings.DEFAULT_EDGE_VOICE,
             lookaheadBufferSize = prefs.getInt(KEY_LOOKAHEAD, TtsSettings.DEFAULT_LOOKAHEAD).coerceIn(1, 4),
             sentencePauseMs = prefs.getInt(KEY_SENTENCE_PAUSE, TtsSettings.DEFAULT_SENTENCE_PAUSE_MS).coerceIn(200, 1200),
             clausePauseMs = prefs.getInt(KEY_CLAUSE_PAUSE, TtsSettings.DEFAULT_CLAUSE_PAUSE_MS).coerceIn(120, 600),
@@ -63,6 +66,7 @@ object ReaderPreferences {
             .putString(KEY_ENGINE_TYPE, settings.engineType.name)
             .putString(KEY_VIENEU_VOICE, settings.selectedVieNeuVoice)
             .putString(KEY_PIPER_VOICE, settings.selectedPiperVoice)
+            .putString(KEY_EDGE_VOICE, settings.selectedEdgeVoice)
             .putString(KEY_SYSTEM_VOICE, settings.selectedSystemVoice)
             .putFloat(KEY_SPEECH_RATE, settings.speechRate)
             .putFloat(KEY_PITCH, settings.pitch)

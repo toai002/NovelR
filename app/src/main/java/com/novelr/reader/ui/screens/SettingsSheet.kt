@@ -65,6 +65,7 @@ import com.novelr.reader.model.SystemVoiceInfo
 import com.novelr.reader.model.TtsEngineType
 import com.novelr.reader.model.TtsSettings
 import com.novelr.reader.model.VieNeuModelStatus
+import com.novelr.reader.service.edgetts.EdgeTtsConstants
 import com.novelr.reader.service.piper.PiperConstants
 import com.novelr.reader.service.piper.PiperModelFamily
 import com.novelr.reader.service.vieneu.VieNeuConstants
@@ -97,6 +98,7 @@ fun SettingsSheet(
     onEngineTypeSelected: (TtsEngineType) -> Unit,
     onVieNeuVoiceSelected: (String) -> Unit,
     onPiperVoiceSelected: (String) -> Unit,
+    onEdgeVoiceSelected: (String) -> Unit,
     onLookaheadBufferSizeChange: (Int) -> Unit,
     onDownloadVieNeuModel: () -> Unit,
     onDownloadPiperModel: () -> Unit,
@@ -170,29 +172,38 @@ fun SettingsSheet(
                 }
             }
 
-            // 2. CHỌN CÔNG NGHỆ GIỌNG ĐỌC (3 BỘ MÁY ĐỘC LẬP) & BỘ LỌC CHỐNG CHÓI DSP
+            // 2. CHỌN CÔNG NGHỆ GIỌNG ĐỌC (4 BỘ MÁY ĐỘC LẬP) & BỘ LỌC CHỐNG CHÓI DSP
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "Công nghệ tổng hợp giọng nói (3 bộ máy)",
+                    text = "Công nghệ tổng hợp giọng nói (4 bộ máy)",
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary
                 )
 
                 SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                     SegmentedButton(
+                        selected = settings.engineType == TtsEngineType.EDGE_ONLINE,
+                        onClick = { onEngineTypeSelected(TtsEngineType.EDGE_ONLINE) },
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 4),
+                        icon = {}
+                    ) {
+                        Text("Edge TTS", fontSize = 11.sp, maxLines = 1)
+                    }
+
+                    SegmentedButton(
                         selected = settings.engineType == TtsEngineType.PIPER_ON_DEVICE,
                         onClick = { onEngineTypeSelected(TtsEngineType.PIPER_ON_DEVICE) },
-                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3),
-                        icon = { Icon(Icons.Default.GraphicEq, contentDescription = null) }
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 4),
+                        icon = {}
                     ) {
-                        Text("Piper (73 giọng)", fontSize = 11.sp, maxLines = 1)
+                        Text("Piper (73)", fontSize = 11.sp, maxLines = 1)
                     }
 
                     SegmentedButton(
                         selected = settings.engineType == TtsEngineType.VIENEU_ON_DEVICE,
                         onClick = { onEngineTypeSelected(TtsEngineType.VIENEU_ON_DEVICE) },
-                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3),
-                        icon = { Icon(Icons.Default.Psychology, contentDescription = null) }
+                        shape = SegmentedButtonDefaults.itemShape(index = 2, count = 4),
+                        icon = {}
                     ) {
                         Text("VieNeu AI", fontSize = 11.sp, maxLines = 1)
                     }
@@ -200,8 +211,8 @@ fun SettingsSheet(
                     SegmentedButton(
                         selected = settings.engineType == TtsEngineType.NATIVE_SYSTEM,
                         onClick = { onEngineTypeSelected(TtsEngineType.NATIVE_SYSTEM) },
-                        shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3),
-                        icon = { Icon(Icons.Default.RecordVoiceOver, contentDescription = null) }
+                        shape = SegmentedButtonDefaults.itemShape(index = 3, count = 4),
+                        icon = {}
                     ) {
                         Text("Hệ Thống", fontSize = 11.sp, maxLines = 1)
                     }
@@ -249,6 +260,148 @@ fun SettingsSheet(
 
             // 3. CẤU HÌNH GIỌNG THEO ENGINE
             when (settings.engineType) {
+                TtsEngineType.EDGE_ONLINE -> {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Microsoft Edge TTS (Trực tiếp • 24kHz)",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Surface(
+                                    color = Color(0xFF2E7D32).copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Default.CheckCircle,
+                                            contentDescription = null,
+                                            tint = Color(0xFF2E7D32),
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Text(
+                                            text = " Không cần tải model (Online)",
+                                            color = Color(0xFF2E7D32),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                            Text(
+                                text = "Kết nối trực tiếp tới máy chủ giọng đọc Neural của Microsoft Edge (chuẩn bảo mật Sec-MS-GEC v2). Bao gồm Hoài My, Nam Minh và 6 giọng Đa Ngôn Ngữ đọc mượt cả tiếng Việt lẫn tên tiếng Anh.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Chọn giọng Microsoft Edge (8 giọng Neural)",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "Mặc định: Hoài My",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+
+                        val edgePairs = EdgeTtsConstants.PRESET_VOICES.chunked(2)
+                        edgePairs.forEach { rowVoices ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                rowVoices.forEach { voice ->
+                                    val isSelected = voice.id == settings.selectedEdgeVoice
+                                    OutlinedCard(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { onEdgeVoiceSelected(voice.id) },
+                                        border = if (isSelected) BorderStroke(
+                                            2.dp,
+                                            MaterialTheme.colorScheme.primary
+                                        ) else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                        colors = CardDefaults.outlinedCardColors(
+                                            containerColor = if (isSelected) {
+                                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                                            } else {
+                                                MaterialTheme.colorScheme.surface
+                                            }
+                                        )
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(10.dp),
+                                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = voice.name,
+                                                    fontWeight = FontWeight.Bold,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                if (isSelected) {
+                                                    Icon(
+                                                        Icons.Default.CheckCircle,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                            Text(
+                                                text = voice.gender,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            Text(
+                                                text = voice.description,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.outline,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 TtsEngineType.PIPER_ON_DEVICE -> {
                     val activePiperProfile = remember(settings.selectedPiperVoice) {
                         PiperConstants.findById(settings.selectedPiperVoice)
@@ -904,7 +1057,8 @@ fun SettingsSheet(
             }
 
             if (settings.engineType == TtsEngineType.VIENEU_ON_DEVICE ||
-                settings.engineType == TtsEngineType.PIPER_ON_DEVICE
+                settings.engineType == TtsEngineType.PIPER_ON_DEVICE ||
+                settings.engineType == TtsEngineType.EDGE_ONLINE
             ) {
                 Column {
                     Row(

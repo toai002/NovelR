@@ -4,6 +4,7 @@ import android.util.Log
 import com.novelr.reader.model.TtsEngineType
 import com.novelr.reader.model.TtsSettings
 import com.novelr.reader.model.VieNeuModelStatus
+import com.novelr.reader.service.edgetts.EdgeTtsEngine
 import com.novelr.reader.service.piper.PiperEngine
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -20,7 +21,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Hàng đợi đệm trước (Pre-Buffering Lookahead Queue) kết hợp Streaming theo mệnh đề
- * dùng chung cho cả **Piper VITS Multi-Voice** và **VieNeu-TTS**.
+ * dùng chung cho cả **Microsoft Edge TTS (Online)**, **Piper VITS Multi-Voice** và **VieNeu-TTS**.
  *
  * Tối ưu hóa:
  * - **Fast-path 0ms**: Nếu câu đã được render trước trong RAM, trả về ngay lập tức.
@@ -31,6 +32,7 @@ import java.util.concurrent.ConcurrentHashMap
 class VieNeuPreBufferQueue(
     private val vieneuEngine: VieNeuEngine,
     private val piperEngine: PiperEngine,
+    private val edgeTtsEngine: EdgeTtsEngine,
     private val scope: CoroutineScope
 ) {
     companion object {
@@ -82,7 +84,7 @@ class VieNeuPreBufferQueue(
             return cached
         }
 
-        // Hủy job prefetch ngầm để nhường toàn bộ CPU cho mệnh đề đầu tiên của câu đang cần phát
+        // Hủy job prefetch ngầm để nhường toàn bộ CPU/Mạng cho câu đang cần phát
         currentPrefetchJob?.cancel()
 
         _isSynthesizing.value = true
@@ -92,28 +94,43 @@ class VieNeuPreBufferQueue(
                     onClauseReady(cached)
                 } ?: run {
                     val text = sentences.getOrNull(index) ?: return@run ShortArray(0)
-                    val synthesized = if (settings.engineType == TtsEngineType.PIPER_ON_DEVICE) {
-                        piperEngine.synthesizeStreaming(
-                            text = text,
-                            voiceId = settings.selectedPiperVoice,
-                            speed = settings.speechRate,
-                            pitch = settings.pitch,
-                            sentencePauseMs = settings.sentencePauseMs,
-                            clausePauseMs = settings.clausePauseMs,
-                            warmVoiceFilter = settings.warmVoiceFilter,
-                            onClauseReady = onClauseReady
-                        )
-                    } else {
-                        vieneuEngine.synthesizeStreaming(
-                            text = text,
-                            voiceId = settings.selectedVieNeuVoice,
-                            speed = settings.speechRate,
-                            pitch = settings.pitch,
-                            sentencePauseMs = settings.sentencePauseMs,
-                            clausePauseMs = settings.clausePauseMs,
-                            warmVoiceFilter = settings.warmVoiceFilter,
-                            onClauseReady = onClauseReady
-                        )
+                    val synthesized = when (settings.engineType) {
+                        TtsEngineType.EDGE_ONLINE -> {
+                            edgeTtsEngine.synthesizeStreaming(
+                                text = text,
+                                voiceId = settings.selectedEdgeVoice,
+                                speed = settings.speechRate,
+                                pitch = settings.pitch,
+                                sentencePauseMs = settings.sentencePauseMs,
+                                clausePauseMs = settings.clausePauseMs,
+                                warmVoiceFilter = settings.warmVoiceFilter,
+                                onClauseReady = onClauseReady
+                            )
+                        }
+                        TtsEngineType.PIPER_ON_DEVICE -> {
+                            piperEngine.synthesizeStreaming(
+                                text = text,
+                                voiceId = settings.selectedPiperVoice,
+                                speed = settings.speechRate,
+                                pitch = settings.pitch,
+                                sentencePauseMs = settings.sentencePauseMs,
+                                clausePauseMs = settings.clausePauseMs,
+                                warmVoiceFilter = settings.warmVoiceFilter,
+                                onClauseReady = onClauseReady
+                            )
+                        }
+                        else -> {
+                            vieneuEngine.synthesizeStreaming(
+                                text = text,
+                                voiceId = settings.selectedVieNeuVoice,
+                                speed = settings.speechRate,
+                                pitch = settings.pitch,
+                                sentencePauseMs = settings.sentencePauseMs,
+                                clausePauseMs = settings.clausePauseMs,
+                                warmVoiceFilter = settings.warmVoiceFilter,
+                                onClauseReady = onClauseReady
+                            )
+                        }
                     }
                     if (synthesized.isNotEmpty()) {
                         audioCache[index] = synthesized
@@ -154,6 +171,7 @@ class VieNeuPreBufferQueue(
         if (sentences.isEmpty() || startIndex >= sentences.size) return
 
         val isEngineReady = when (settings.engineType) {
+            TtsEngineType.EDGE_ONLINE -> true
             TtsEngineType.PIPER_ON_DEVICE -> piperEngine.modelStatus.value == VieNeuModelStatus.READY
             TtsEngineType.VIENEU_ON_DEVICE -> vieneuEngine.modelStatus.value == VieNeuModelStatus.READY
             TtsEngineType.NATIVE_SYSTEM -> false
@@ -172,26 +190,40 @@ class VieNeuPreBufferQueue(
                 try {
                     _isSynthesizing.value = true
                     val pcm = synthesisMutex.withLock {
-                        audioCache[idx] ?: if (settings.engineType == TtsEngineType.PIPER_ON_DEVICE) {
-                            piperEngine.synthesize(
-                                text = sentence,
-                                voiceId = settings.selectedPiperVoice,
-                                speed = settings.speechRate,
-                                pitch = settings.pitch,
-                                sentencePauseMs = settings.sentencePauseMs,
-                                clausePauseMs = settings.clausePauseMs,
-                                warmVoiceFilter = settings.warmVoiceFilter
-                            )
-                        } else {
-                            vieneuEngine.synthesize(
-                                text = sentence,
-                                voiceId = settings.selectedVieNeuVoice,
-                                speed = settings.speechRate,
-                                pitch = settings.pitch,
-                                sentencePauseMs = settings.sentencePauseMs,
-                                clausePauseMs = settings.clausePauseMs,
-                                warmVoiceFilter = settings.warmVoiceFilter
-                            )
+                        audioCache[idx] ?: when (settings.engineType) {
+                            TtsEngineType.EDGE_ONLINE -> {
+                                edgeTtsEngine.synthesize(
+                                    text = sentence,
+                                    voiceId = settings.selectedEdgeVoice,
+                                    speed = settings.speechRate,
+                                    pitch = settings.pitch,
+                                    sentencePauseMs = settings.sentencePauseMs,
+                                    clausePauseMs = settings.clausePauseMs,
+                                    warmVoiceFilter = settings.warmVoiceFilter
+                                )
+                            }
+                            TtsEngineType.PIPER_ON_DEVICE -> {
+                                piperEngine.synthesize(
+                                    text = sentence,
+                                    voiceId = settings.selectedPiperVoice,
+                                    speed = settings.speechRate,
+                                    pitch = settings.pitch,
+                                    sentencePauseMs = settings.sentencePauseMs,
+                                    clausePauseMs = settings.clausePauseMs,
+                                    warmVoiceFilter = settings.warmVoiceFilter
+                                )
+                            }
+                            else -> {
+                                vieneuEngine.synthesize(
+                                    text = sentence,
+                                    voiceId = settings.selectedVieNeuVoice,
+                                    speed = settings.speechRate,
+                                    pitch = settings.pitch,
+                                    sentencePauseMs = settings.sentencePauseMs,
+                                    clausePauseMs = settings.clausePauseMs,
+                                    warmVoiceFilter = settings.warmVoiceFilter
+                                )
+                            }
                         }
                     }
                     if (isActive && pcm.isNotEmpty()) {

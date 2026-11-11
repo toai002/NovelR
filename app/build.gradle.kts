@@ -12,8 +12,8 @@ android {
         applicationId = "com.novelr.reader"
         minSdk = 26
         targetSdk = 35
-        versionCode = 25
-        versionName = "2.1.1"
+        versionCode = 26
+        versionName = "2.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -73,8 +73,11 @@ dependencies {
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
 
-    // ONNX Runtime Android for On-Device VieNeu-TTS
+    // ONNX Runtime Android for On-Device VieNeu-TTS & Piper VITS
     implementation(libs.onnxruntime.android)
+
+    // OkHttp WebSocket for Direct Microsoft Edge TTS
+    implementation(libs.okhttp)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

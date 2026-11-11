@@ -11,6 +11,7 @@ enum class PlaybackStatus {
 
 enum class TtsEngineType {
     NATIVE_SYSTEM,      // Hệ thống Android TTS (Google, Samsung...)
+    EDGE_ONLINE,        // Microsoft Edge TTS Trực tiếp (Hoài My, Nam Minh + 6 giọng Đa Ngôn Ngữ)
     PIPER_ON_DEVICE,    // Piper VITS Offline (73 giọng đa dạng: 8 giọng HD rõ chữ + 65 giọng VIVOS, siêu nhanh ~100ms)
     VIENEU_ON_DEVICE    // VieNeu-TTS v3 Nano AI chạy ONNX On-Device offline (Truyền cảm)
 }
@@ -54,6 +55,7 @@ data class TtsSettings(
     val engineType: TtsEngineType = TtsEngineType.NATIVE_SYSTEM,
     val selectedVieNeuVoice: String = DEFAULT_VIENEU_VOICE,
     val selectedPiperVoice: String = DEFAULT_PIPER_VOICE,
+    val selectedEdgeVoice: String = DEFAULT_EDGE_VOICE,
     val lookaheadBufferSize: Int = DEFAULT_LOOKAHEAD,
     val sentencePauseMs: Int = DEFAULT_SENTENCE_PAUSE_MS,
     val clausePauseMs: Int = DEFAULT_CLAUSE_PAUSE_MS,
@@ -66,6 +68,7 @@ data class TtsSettings(
         const val DEFAULT_PITCH = 1.0f
         const val DEFAULT_VIENEU_VOICE = "duc_tri"
         const val DEFAULT_PIPER_VOICE = "vais_default"
+        const val DEFAULT_EDGE_VOICE = "vi-VN-HoaiMyNeural"
         const val DEFAULT_LOOKAHEAD = 2
         const val DEFAULT_SENTENCE_PAUSE_MS = 550
         const val DEFAULT_CLAUSE_PAUSE_MS = 240
@@ -77,6 +80,7 @@ data class TtsSettings(
                 pitch == DEFAULT_PITCH &&
                 selectedVieNeuVoice == DEFAULT_VIENEU_VOICE &&
                 selectedPiperVoice == DEFAULT_PIPER_VOICE &&
+                selectedEdgeVoice == DEFAULT_EDGE_VOICE &&
                 selectedSystemVoice == null &&
                 lookaheadBufferSize == DEFAULT_LOOKAHEAD &&
                 sentencePauseMs == DEFAULT_SENTENCE_PAUSE_MS &&
@@ -92,6 +96,7 @@ data class TtsSettings(
         pitch = DEFAULT_PITCH,
         selectedVieNeuVoice = DEFAULT_VIENEU_VOICE,
         selectedPiperVoice = DEFAULT_PIPER_VOICE,
+        selectedEdgeVoice = DEFAULT_EDGE_VOICE,
         selectedSystemVoice = null,
         lookaheadBufferSize = DEFAULT_LOOKAHEAD,
         sentencePauseMs = DEFAULT_SENTENCE_PAUSE_MS,

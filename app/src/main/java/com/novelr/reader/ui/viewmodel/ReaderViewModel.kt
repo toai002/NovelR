@@ -334,6 +334,11 @@ class ReaderViewModel : ViewModel() {
         ttsManager?.updateSettings(newSettings)
     }
 
+    fun selectEdgeVoice(voiceId: String) {
+        val newSettings = _uiState.value.settings.copy(selectedEdgeVoice = voiceId)
+        ttsManager?.updateSettings(newSettings)
+    }
+
     fun updateLookaheadBuffer(bufferSize: Int) {
         val newSettings = _uiState.value.settings.copy(lookaheadBufferSize = bufferSize)
         ttsManager?.updateSettings(newSettings)

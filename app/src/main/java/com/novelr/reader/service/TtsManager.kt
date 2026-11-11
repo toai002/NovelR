@@ -13,6 +13,7 @@ import com.novelr.reader.model.SystemVoiceInfo
 import com.novelr.reader.model.TtsEngineType
 import com.novelr.reader.model.TtsSettings
 import com.novelr.reader.model.VieNeuModelStatus
+import com.novelr.reader.service.edgetts.EdgeTtsEngine
 import com.novelr.reader.service.piper.PiperEngine
 import com.novelr.reader.service.vieneu.VieNeuAudioPlayer
 import com.novelr.reader.service.vieneu.VieNeuEngine
@@ -67,8 +68,11 @@ class TtsManager(
     // --- Piper VITS Multi-Voice Offline Engine (73 Giọng Rõ Chữ) ---
     val piperEngine = PiperEngine(context)
 
+    // --- Microsoft Edge TTS Direct Online Engine (Hoài My, Nam Minh + 6 Giọng Đa Ngôn Ngữ) ---
+    val edgeTtsEngine = EdgeTtsEngine(context)
+
     private val vieneuAudioPlayer = VieNeuAudioPlayer(scope, sharedAudioSessionId)
-    val vieneuPreBufferQueue = VieNeuPreBufferQueue(vieneuEngine, piperEngine, scope)
+    val vieneuPreBufferQueue = VieNeuPreBufferQueue(vieneuEngine, piperEngine, edgeTtsEngine, scope)
 
     private val _playbackStatus = MutableStateFlow(PlaybackStatus.IDLE)
     val playbackStatus: StateFlow<PlaybackStatus> = _playbackStatus.asStateFlow()
@@ -110,6 +114,7 @@ class TtsManager(
         when (_settings.value.engineType) {
             TtsEngineType.PIPER_ON_DEVICE -> vieneuEngine.unloadSessions()
             TtsEngineType.VIENEU_ON_DEVICE -> piperEngine.unloadSessions()
+            TtsEngineType.EDGE_ONLINE,
             TtsEngineType.NATIVE_SYSTEM -> {
                 vieneuEngine.unloadSessions()
                 piperEngine.unloadSessions()
@@ -151,11 +156,13 @@ class TtsManager(
 
     private fun isOnDeviceNeuralEngineActive(settings: TtsSettings = _settings.value): Boolean {
         return settings.engineType == TtsEngineType.VIENEU_ON_DEVICE ||
-                settings.engineType == TtsEngineType.PIPER_ON_DEVICE
+                settings.engineType == TtsEngineType.PIPER_ON_DEVICE ||
+                settings.engineType == TtsEngineType.EDGE_ONLINE
     }
 
     private fun isActiveNeuralModelReady(settings: TtsSettings = _settings.value): Boolean {
         return when (settings.engineType) {
+            TtsEngineType.EDGE_ONLINE -> true
             TtsEngineType.VIENEU_ON_DEVICE -> vieneuEngine.modelStatus.value == VieNeuModelStatus.READY
             TtsEngineType.PIPER_ON_DEVICE -> piperEngine.modelStatus.value == VieNeuModelStatus.READY
             TtsEngineType.NATIVE_SYSTEM -> false
@@ -428,6 +435,9 @@ class TtsManager(
         if (index !in list.indices) return
 
         when (_settings.value.engineType) {
+            TtsEngineType.EDGE_ONLINE -> {
+                speakWithOnDeviceNeural(index)
+            }
             TtsEngineType.VIENEU_ON_DEVICE -> {
                 if (vieneuEngine.modelStatus.value == VieNeuModelStatus.READY) {
                     speakWithOnDeviceNeural(index)
@@ -557,6 +567,7 @@ class TtsManager(
         val engineTypeChanged = oldSettings.engineType != newSettings.engineType
         val audioParamsChanged = oldSettings.selectedVieNeuVoice != newSettings.selectedVieNeuVoice ||
                 oldSettings.selectedPiperVoice != newSettings.selectedPiperVoice ||
+                oldSettings.selectedEdgeVoice != newSettings.selectedEdgeVoice ||
                 oldSettings.selectedSystemVoice != newSettings.selectedSystemVoice ||
                 oldSettings.speechRate != newSettings.speechRate ||
                 oldSettings.pitch != newSettings.pitch ||
@@ -584,6 +595,7 @@ class TtsManager(
                         downloadVieNeuModel()
                     }
                 }
+                TtsEngineType.EDGE_ONLINE,
                 TtsEngineType.NATIVE_SYSTEM -> {
                     vieneuEngine.unloadSessions()
                     piperEngine.unloadSessions()

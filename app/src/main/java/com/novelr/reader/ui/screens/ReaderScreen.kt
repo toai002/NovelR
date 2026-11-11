@@ -34,6 +34,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FolderOpen
@@ -95,6 +96,7 @@ import com.novelr.reader.model.ReadingTheme
 import com.novelr.reader.model.TtsEngineType
 import com.novelr.reader.model.TtsSettings
 import com.novelr.reader.model.VieNeuModelStatus
+import com.novelr.reader.service.edgetts.EdgeTtsConstants
 import com.novelr.reader.service.piper.PiperConstants
 import com.novelr.reader.service.vieneu.VieNeuConstants
 import com.novelr.reader.util.ReaderParagraph
@@ -197,6 +199,7 @@ fun ReaderScreen(
     onEngineTypeSelected: (TtsEngineType) -> Unit,
     onVieNeuVoiceSelected: (String) -> Unit,
     onPiperVoiceSelected: (String) -> Unit,
+    onEdgeVoiceSelected: (String) -> Unit,
     onLookaheadBufferSizeChange: (Int) -> Unit,
     onDownloadVieNeuModel: () -> Unit,
     onDownloadPiperModel: () -> Unit
@@ -242,6 +245,10 @@ fun ReaderScreen(
 
     val activePiperVoiceName = remember(uiState.settings.selectedPiperVoice) {
         PiperConstants.findById(uiState.settings.selectedPiperVoice).name
+    }
+
+    val activeEdgeVoiceName = remember(uiState.settings.selectedEdgeVoice) {
+        EdgeTtsConstants.findById(uiState.settings.selectedEdgeVoice).name
     }
 
     val txtPickerLauncher = rememberLauncherForActivityResult(
@@ -291,6 +298,21 @@ fun ReaderScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             val rateText = String.format(Locale.US, "%.2fx", uiState.settings.speechRate)
                             when (uiState.settings.engineType) {
+                                TtsEngineType.EDGE_ONLINE -> {
+                                    Icon(
+                                        imageVector = Icons.Default.CloudQueue,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(12.dp),
+                                        tint = palette.accentColor
+                                    )
+                                    Text(
+                                        text = " Edge TTS ($activeEdgeVoiceName • $rateText) • Câu ${uiState.currentIndex + 1}/${uiState.sentences.size} ($progressPercent%)",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = palette.accentColor,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                                 TtsEngineType.PIPER_ON_DEVICE -> {
                                     Icon(
                                         imageVector = Icons.Default.GraphicEq,
@@ -406,6 +428,7 @@ fun ReaderScreen(
                 onReadingThemeChange = onReadingThemeChange,
                 onEngineTypeSelected = onEngineTypeSelected,
                 onPiperVoiceSelected = onPiperVoiceSelected,
+                onEdgeVoiceSelected = onEdgeVoiceSelected,
                 onOpenFullSettings = { showSettingsSheet = true }
             )
         }
@@ -429,7 +452,8 @@ fun ReaderScreen(
                     paragraph = paragraph,
                     currentSentenceIndex = uiState.currentIndex,
                     prebufferedIndices = if (uiState.settings.engineType == TtsEngineType.VIENEU_ON_DEVICE ||
-                        uiState.settings.engineType == TtsEngineType.PIPER_ON_DEVICE
+                        uiState.settings.engineType == TtsEngineType.PIPER_ON_DEVICE ||
+                        uiState.settings.engineType == TtsEngineType.EDGE_ONLINE
                     ) {
                         uiState.prebufferedIndices
                     } else {
@@ -474,6 +498,7 @@ fun ReaderScreen(
             onEngineTypeSelected = onEngineTypeSelected,
             onVieNeuVoiceSelected = onVieNeuVoiceSelected,
             onPiperVoiceSelected = onPiperVoiceSelected,
+            onEdgeVoiceSelected = onEdgeVoiceSelected,
             onLookaheadBufferSizeChange = onLookaheadBufferSizeChange,
             onDownloadVieNeuModel = onDownloadVieNeuModel,
             onDownloadPiperModel = onDownloadPiperModel,
@@ -607,6 +632,7 @@ private fun AtReaderBottomConsole(
     onReadingThemeChange: (ReadingTheme) -> Unit,
     onEngineTypeSelected: (TtsEngineType) -> Unit,
     onPiperVoiceSelected: (String) -> Unit,
+    onEdgeVoiceSelected: (String) -> Unit,
     onOpenFullSettings: () -> Unit
 ) {
     val totalSentences = uiState.sentences.size
@@ -614,6 +640,7 @@ private fun AtReaderBottomConsole(
     val settings = uiState.settings
     val isVieNeu = settings.engineType == TtsEngineType.VIENEU_ON_DEVICE
     val isPiper = settings.engineType == TtsEngineType.PIPER_ON_DEVICE
+    val isEdge = settings.engineType == TtsEngineType.EDGE_ONLINE
 
     var isDraggingSlider by remember { mutableStateOf(false) }
     var sliderPosition by remember(currentIndex) { mutableFloatStateOf(currentIndex.toFloat()) }
@@ -658,6 +685,11 @@ private fun AtReaderBottomConsole(
                                 selected = settings.engineType == TtsEngineType.NATIVE_SYSTEM,
                                 onClick = { onEngineTypeSelected(TtsEngineType.NATIVE_SYSTEM) },
                                 label = { Text("Hệ thống", fontSize = 12.sp) }
+                            )
+                            FilterChip(
+                                selected = isEdge,
+                                onClick = { onEngineTypeSelected(TtsEngineType.EDGE_ONLINE) },
+                                label = { Text("Edge TTS", fontSize = 12.sp) }
                             )
                             FilterChip(
                                 selected = isPiper,
@@ -708,6 +740,25 @@ private fun AtReaderBottomConsole(
                                     Icons.Default.KeyboardArrowDown,
                                     contentDescription = "Thu gọn",
                                     tint = palette.textSecondary
+                                )
+                            }
+                        }
+                    }
+
+                    // Nếu đang chọn Edge TTS, hiển thị thanh chọn nhanh 8 giọng Microsoft Edge Neural ngay trong khay
+                    if (isEdge) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                        ) {
+                            EdgeTtsConstants.ALL_VOICES.forEach { profile ->
+                                FilterChip(
+                                    selected = settings.selectedEdgeVoice == profile.id,
+                                    onClick = { onEdgeVoiceSelected(profile.id) },
+                                    label = { Text(profile.name, fontSize = 11.sp) }
                                 )
                             }
                         }
@@ -878,7 +929,26 @@ private fun AtReaderBottomConsole(
                         color = palette.textSecondary
                     )
 
-                    if (isPiper) {
+                    if (isEdge) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.CloudQueue,
+                                contentDescription = null,
+                                modifier = Modifier.size(11.dp),
+                                tint = if (uiState.isSynthesizing) palette.accentColor else Color(0xFF2E7D32)
+                            )
+                            val statusText = if (uiState.isSynthesizing) {
+                                " Đang tải Edge..."
+                            } else {
+                                " Đệm: ${uiState.prebufferedIndices.size} câu"
+                            }
+                            Text(
+                                text = statusText,
+                                fontSize = 11.sp,
+                                color = if (uiState.isSynthesizing) palette.accentColor else Color(0xFF2E7D32)
+                            )
+                        }
+                    } else if (isPiper) {
                         val activeStatus = uiState.piperModelStatus
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
