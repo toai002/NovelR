@@ -1071,17 +1071,17 @@ fun SettingsSheet(
                             fontWeight = FontWeight.Medium
                         )
                         Text(
-                            text = "${settings.lookaheadBufferSize} câu (Mặc định: 2)",
+                            text = "${settings.lookaheadBufferSize} câu (Mặc định: 8)",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold
                         )
                     }
                     Slider(
-                        value = settings.lookaheadBufferSize.toFloat(),
-                        onValueChange = { onLookaheadBufferSizeChange(it.toInt()) },
-                        valueRange = 1f..4f,
-                        steps = 2
+                        value = settings.lookaheadBufferSize.coerceIn(2, 12).toFloat(),
+                        onValueChange = { onLookaheadBufferSizeChange(it.toInt().coerceIn(2, 12)) },
+                        valueRange = 2f..12f,
+                        steps = 9
                     )
                 }
             }

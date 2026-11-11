@@ -17,7 +17,7 @@ object ReaderPreferences {
     private const val KEY_PITCH = "pitch"
     private const val KEY_SENTENCE_PAUSE = "sentence_pause_ms"
     private const val KEY_CLAUSE_PAUSE = "clause_pause_ms"
-    private const val KEY_LOOKAHEAD = "lookahead_buffer"
+    private const val KEY_LOOKAHEAD = "lookahead_buffer_v2"
     private const val KEY_WARM_FILTER = "warm_voice_filter"
     private const val KEY_BG_PLAYBACK = "background_playback"
     private const val KEY_HEADSET_AUTO_PLAY = "headset_auto_play_pause"
@@ -51,7 +51,7 @@ object ReaderPreferences {
                 ?: TtsSettings.DEFAULT_PIPER_VOICE,
             selectedEdgeVoice = prefs.getString(KEY_EDGE_VOICE, TtsSettings.DEFAULT_EDGE_VOICE)
                 ?: TtsSettings.DEFAULT_EDGE_VOICE,
-            lookaheadBufferSize = prefs.getInt(KEY_LOOKAHEAD, TtsSettings.DEFAULT_LOOKAHEAD).coerceIn(1, 4),
+            lookaheadBufferSize = prefs.getInt(KEY_LOOKAHEAD, TtsSettings.DEFAULT_LOOKAHEAD).coerceIn(2, 12),
             sentencePauseMs = prefs.getInt(KEY_SENTENCE_PAUSE, TtsSettings.DEFAULT_SENTENCE_PAUSE_MS).coerceIn(200, 1200),
             clausePauseMs = prefs.getInt(KEY_CLAUSE_PAUSE, TtsSettings.DEFAULT_CLAUSE_PAUSE_MS).coerceIn(120, 600),
             warmVoiceFilter = prefs.getBoolean(KEY_WARM_FILTER, TtsSettings.DEFAULT_WARM_VOICE_FILTER),

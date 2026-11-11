@@ -19,36 +19,29 @@ object EdgeTtsConstants {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0"
     const val ORIGIN = "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold"
 
-    const val DEFAULT_EDGE_VOICE = "vi-VN-HoaiMyNeural"
+    const val DEFAULT_EDGE_VOICE = "en-US-AvaMultilingualNeural"
 
     val PRESET_VOICES = listOf(
         EdgeVoiceProfile(
-            id = "vi-VN-HoaiMyNeural",
-            shortName = "vi-VN-HoaiMyNeural",
-            name = "Hoài My (Chuẩn Edge)",
-            gender = "Nữ • Tiếng Việt",
-            description = "Giọng nữ Tiếng Việt chính thức của Microsoft Edge • Rõ chữ, tự nhiên"
-        ),
-        EdgeVoiceProfile(
-            id = "vi-VN-NamMinhNeural",
-            shortName = "vi-VN-NamMinhNeural",
-            name = "Nam Minh (Chuẩn Edge)",
-            gender = "Nam • Tiếng Việt",
-            description = "Giọng nam Tiếng Việt chính thức của Microsoft Edge • Trầm ấm, đĩnh đạc"
-        ),
-        EdgeVoiceProfile(
             id = "en-US-AvaMultilingualNeural",
             shortName = "en-US-AvaMultilingualNeural",
-            name = "Ava Đa Ngôn Ngữ",
-            gender = "Nữ • Việt-Anh",
-            description = "Giọng nữ đa ngôn ngữ thế hệ mới • Đọc tiếng Việt & tên tiếng Anh siêu mượt"
+            name = "Ava Đa Ngôn Ngữ (Siêu tốc)",
+            gender = "Nữ • Việt-Anh • Khuyên dùng",
+            description = "Giọng nữ đa ngôn ngữ phản hồi siêu nhanh (~0.2s) • Đọc tiếng Việt & tên tiếng Anh cực mượt"
         ),
         EdgeVoiceProfile(
-            id = "en-US-AndrewMultilingualNeural",
-            shortName = "en-US-AndrewMultilingualNeural",
-            name = "Andrew Đa Ngôn Ngữ",
-            gender = "Nam • Việt-Anh",
-            description = "Giọng nam đa ngôn ngữ ấm áp • Đọc tiểu thuyết có tên nước ngoài cực chuẩn"
+            id = "fr-FR-VivienneMultilingualNeural",
+            shortName = "fr-FR-VivienneMultilingualNeural",
+            name = "Vivienne Đa Ngôn Ngữ (Siêu tốc)",
+            gender = "Nữ • Thanh lịch • Nhanh",
+            description = "Giọng nữ đa ngôn ngữ tốc độ cao, âm sắc sang trọng, đọc rõ từng chữ"
+        ),
+        EdgeVoiceProfile(
+            id = "fr-FR-RemyMultilingualNeural",
+            shortName = "fr-FR-RemyMultilingualNeural",
+            name = "Remy Đa Ngôn Ngữ (Siêu tốc)",
+            gender = "Nam • Trầm sâu • Khuyên dùng",
+            description = "Giọng nam đa ngôn ngữ phản hồi nhanh, trầm dày, hợp đọc truyện kiếm hiệp / tiên hiệp"
         ),
         EdgeVoiceProfile(
             id = "en-US-EmmaMultilingualNeural",
@@ -65,22 +58,44 @@ object EdgeTtsConstants {
             description = "Giọng nam đa ngôn ngữ trẻ trung, phát âm dứt khoát, tốc độ phản hồi nhanh"
         ),
         EdgeVoiceProfile(
-            id = "fr-FR-VivienneMultilingualNeural",
-            shortName = "fr-FR-VivienneMultilingualNeural",
-            name = "Vivienne Đa Ngôn Ngữ",
-            gender = "Nữ • Thanh lịch",
-            description = "Giọng nữ đa ngôn ngữ âm sắc sang trọng, đọc rõ từng chữ"
+            id = "en-US-AndrewMultilingualNeural",
+            shortName = "en-US-AndrewMultilingualNeural",
+            name = "Andrew Đa Ngôn Ngữ",
+            gender = "Nam • Việt-Anh",
+            description = "Giọng nam đa ngôn ngữ ấm áp • Đọc tiểu thuyết có tên nước ngoài cực chuẩn"
         ),
         EdgeVoiceProfile(
-            id = "fr-FR-RemyMultilingualNeural",
-            shortName = "fr-FR-RemyMultilingualNeural",
-            name = "Remy Đa Ngôn Ngữ",
-            gender = "Nam • Trầm sâu",
-            description = "Giọng nam đa ngôn ngữ trầm dày, hợp đọc truyện lịch sử / kiếm hiệp"
+            id = "vi-VN-HoaiMyNeural",
+            shortName = "vi-VN-HoaiMyNeural",
+            name = "Hoài My (Chuẩn Edge)",
+            gender = "Nữ • Tiếng Việt",
+            description = "Giọng nữ Tiếng Việt chính thức của Microsoft Edge • Tự động tăng tốc dự phòng khi nghẽn"
+        ),
+        EdgeVoiceProfile(
+            id = "vi-VN-NamMinhNeural",
+            shortName = "vi-VN-NamMinhNeural",
+            name = "Nam Minh (Chuẩn Edge)",
+            gender = "Nam • Tiếng Việt",
+            description = "Giọng nam Tiếng Việt chính thức của Microsoft Edge • Tự động tăng tốc dự phòng khi nghẽn"
         )
     )
 
     fun findById(voiceId: String): EdgeVoiceProfile {
         return PRESET_VOICES.find { it.id == voiceId } ?: PRESET_VOICES.first()
+    }
+
+    /**
+     * Chuyển mã ngắn (vd: "en-US-AvaMultilingualNeural") sang định dạng chuẩn của Microsoft Edge Server:
+     * "Microsoft Server Speech Text to Speech Voice (en-US, AvaMultilingualNeural)"
+     */
+    fun toServerVoiceName(shortName: String): String {
+        val parts = shortName.split("-")
+        return if (parts.size >= 3) {
+            val langRegion = "${parts[0]}-${parts[1]}"
+            val voiceName = parts.drop(2).joinToString("-")
+            "Microsoft Server Speech Text to Speech Voice ($langRegion, $voiceName)"
+        } else {
+            shortName
+        }
     }
 }
