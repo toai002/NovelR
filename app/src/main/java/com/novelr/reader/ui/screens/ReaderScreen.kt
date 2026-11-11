@@ -754,7 +754,7 @@ private fun AtReaderBottomConsole(
                                 .fillMaxWidth()
                                 .horizontalScroll(rememberScrollState())
                         ) {
-                            EdgeTtsConstants.ALL_VOICES.forEach { profile ->
+                            EdgeTtsConstants.PRESET_VOICES.forEach { profile ->
                                 FilterChip(
                                     selected = settings.selectedEdgeVoice == profile.id,
                                     onClick = { onEdgeVoiceSelected(profile.id) },
