@@ -60,7 +60,7 @@ class VieNeuIntegrationTest {
         assertEquals(1.0f, resetSettings.speechRate, 0.001f)
         assertEquals(1.0f, resetSettings.pitch, 0.001f)
         assertEquals(550, resetSettings.sentencePauseMs)
-        assertEquals(2, resetSettings.lookaheadBufferSize)
+        assertEquals(TtsSettings.DEFAULT_LOOKAHEAD, resetSettings.lookaheadBufferSize)
         assertTrue(resetSettings.isDefaultVoiceConfig)
     }
 
