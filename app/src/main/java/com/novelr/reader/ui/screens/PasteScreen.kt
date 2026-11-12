@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.PostAdd
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -67,6 +68,7 @@ fun PasteScreen(
     activeSentenceIndex: Int,
     onResumeActiveSession: () -> Unit,
     onTextChanged: (String) -> Unit,
+    onAppendText: (String) -> Unit = {},
     onPickTxtFile: (Uri) -> Unit,
     onStartReading: () -> Unit
 ) {
@@ -204,6 +206,19 @@ fun PasteScreen(
                     Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Dán Clipboard")
+                }
+
+                FilledTonalButton(
+                    onClick = {
+                        val clip = clipboardManager.getText()?.text
+                        if (!clip.isNullOrBlank()) {
+                            onAppendText(clip)
+                        }
+                    }
+                ) {
+                    Icon(Icons.Default.PostAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Dán nối tiếp")
                 }
 
                 OutlinedButton(

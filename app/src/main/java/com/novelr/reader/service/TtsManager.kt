@@ -346,6 +346,66 @@ class TtsManager(
         setBookContent(emptyList(), newSentences, startIndex, title)
     }
 
+    /**
+     * Dán nối tiếp văn bản mới vào cuối bài đang đọc mà KHÔNG làm gián đoạn câu đang phát:
+     * - Nếu đang PLAYING: giữ nguyên câu đang phát và bộ đệm RAM hiện tại, chỉ cập nhật danh sách đoạn/câu mở rộng
+     *   và kích hoạt prefetch tiếp các câu mới ở cuối.
+     * - Nếu vừa đọc xong (COMPLETED) hoặc đang dừng ở câu cuối cùng: tự động nhảy sang câu đầu tiên của đoạn
+     *   vừa nối thêm và bắt đầu đọc ngay.
+     * - Nếu đang PAUSED / IDLE ở giữa bài: giữ nguyên vị trí câu hiện tại và nạp trước bộ đệm.
+     */
+    fun appendBookContent(
+        newParagraphs: List<ReaderParagraph>,
+        newSentences: List<String>,
+        title: String = "",
+        autoPlayIfFinished: Boolean = true
+    ): Int {
+        if (newSentences.isEmpty()) return 0
+        val oldCount = _sentences.value.size
+        val addedCount = (newSentences.size - oldCount).coerceAtLeast(0)
+        val status = _playbackStatus.value
+        val curIdx = _currentIndex.value
+
+        if (title.isNotBlank()) {
+            _bookTitle.value = title
+        }
+        _paragraphs.value = newParagraphs
+        _sentences.value = newSentences
+
+        if (status == PlaybackStatus.PLAYING) {
+            if (isOnDeviceNeuralEngineActive() && isActiveNeuralModelReady()) {
+                vieneuPreBufferQueue.triggerPrefetch(
+                    startIndex = (curIdx + 1).coerceAtMost(newSentences.size - 1),
+                    sentences = newSentences,
+                    settings = _settings.value
+                )
+            }
+        } else if (status == PlaybackStatus.COMPLETED || (oldCount > 0 && curIdx >= oldCount - 1 && addedCount > 0)) {
+            val nextStartIdx = oldCount.coerceIn(0, newSentences.size - 1)
+            _currentIndex.value = nextStartIdx
+            if (autoPlayIfFinished) {
+                play()
+            } else if (isOnDeviceNeuralEngineActive() && isActiveNeuralModelReady()) {
+                vieneuPreBufferQueue.triggerPrefetch(
+                    startIndex = nextStartIdx,
+                    sentences = newSentences,
+                    settings = _settings.value
+                )
+            }
+        } else {
+            val safeIdx = curIdx.coerceIn(0, newSentences.size - 1)
+            _currentIndex.value = safeIdx
+            if (isOnDeviceNeuralEngineActive() && isActiveNeuralModelReady()) {
+                vieneuPreBufferQueue.triggerPrefetch(
+                    startIndex = safeIdx,
+                    sentences = newSentences,
+                    settings = _settings.value
+                )
+            }
+        }
+        return addedCount
+    }
+
     fun play() {
         val list = _sentences.value
         if (list.isEmpty()) return
@@ -490,7 +550,8 @@ class TtsManager(
         val onSentenceFinished: () -> Unit = {
             scope.launch {
                 if (_playbackStatus.value == PlaybackStatus.PLAYING) {
-                    if (index + 1 < list.size) {
+                    val currentSentences = _sentences.value
+                    if (index + 1 < currentSentences.size) {
                         val nextIdx = index + 1
                         _currentIndex.value = nextIdx
                         speakSentence(nextIdx)

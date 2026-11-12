@@ -41,6 +41,14 @@ class ReaderViewModel : ViewModel() {
     private var appContext: Context? = null
     private val observerJobs = mutableListOf<Job>()
 
+    private data class PendingSharedAction(
+        val text: String,
+        val append: Boolean,
+        val title: String
+    )
+
+    private var pendingSharedAction: PendingSharedAction? = null
+
     fun attachService(service: TtsAudioService) {
         val manager = service.ttsManager
         if (this.ttsManager === manager && observerJobs.isNotEmpty()) return
@@ -123,9 +131,58 @@ class ReaderViewModel : ViewModel() {
             }
         }.launchIn(viewModelScope)
 
-        // Khôi phục bài đọc gần nhất (hoặc văn bản hướng dẫn mẫu) giống @Voice Aloud Reader
-        if (manager.sentences.value.isEmpty()) {
+        // Xử lý văn bản được chia sẻ từ ứng dụng khác (Share / Process Text) hoặc khôi phục bài đọc gần nhất
+        val pending = pendingSharedAction
+        if (pending != null) {
+            pendingSharedAction = null
+            handlePendingSharedOnAttach(service.applicationContext, manager, pending)
+        } else if (manager.sentences.value.isEmpty()) {
             restoreOrInitDefaultBook(service.applicationContext, manager)
+        }
+    }
+
+    private fun handlePendingSharedOnAttach(
+        context: Context,
+        manager: TtsManager,
+        pending: PendingSharedAction
+    ) {
+        viewModelScope.launch {
+            if (!pending.append) {
+                loadTextContent(
+                    raw = pending.text,
+                    title = pending.title,
+                    autoPlay = true
+                )
+                return@launch
+            }
+
+            // Nếu chọn Chia sẻ nối tiếp khi app vừa khởi động lạnh: khôi phục bài đọc cũ trước rồi nối tiếp vào cuối
+            if (manager.sentences.value.isEmpty()) {
+                val saved = ReaderPreferences.loadLastSession(context)
+                val baseRaw = saved?.second?.takeIf {
+                    it.isNotBlank() && it.trim() != DEFAULT_WELCOME_TEXT.trim()
+                }
+                if (baseRaw != null) {
+                    val baseTitle = saved.first.ifBlank { "NovelR Reader" }
+                    val baseIdx = saved.third
+                    val baseParsed = withContext(Dispatchers.Default) {
+                        TextSplitter.parseBookContent(baseRaw)
+                    }
+                    if (baseParsed.sentences.isNotEmpty()) {
+                        _uiState.update { it.copy(rawText = baseRaw, bookTitle = baseTitle) }
+                        manager.setBookContent(
+                            newParagraphs = baseParsed.paragraphs,
+                            newSentences = baseParsed.sentences,
+                            startIndex = baseIdx.coerceIn(0, baseParsed.sentences.size - 1),
+                            title = baseTitle
+                        )
+                    }
+                }
+            }
+            appendTextContent(
+                appendedRaw = pending.text,
+                autoPlayIfFinished = true
+            )
         }
     }
 
@@ -189,6 +246,105 @@ class ReaderViewModel : ViewModel() {
                 }
                 onReady()
             }
+        }
+    }
+
+    /**
+     * Dán nối tiếp văn bản mới vào cuối đoạn văn bản đang đọc mà không làm đứt quãng câu đang phát.
+     */
+    fun appendTextContent(
+        appendedRaw: String,
+        autoPlayIfFinished: Boolean = true,
+        onAppended: (Int) -> Unit = {}
+    ) {
+        val cleanAppend = appendedRaw.trim()
+        if (cleanAppend.isBlank()) return
+
+        val currentRaw = _uiState.value.rawText
+        val isCurrentlyWelcomeOrEmpty = currentRaw.isBlank() ||
+                currentRaw.trim() == DEFAULT_WELCOME_TEXT.trim()
+
+        if (isCurrentlyWelcomeOrEmpty) {
+            loadTextContent(
+                raw = cleanAppend,
+                title = "Văn bản đã dán",
+                autoPlay = autoPlayIfFinished,
+                onReady = {
+                    onAppended(_uiState.value.sentences.size)
+                }
+            )
+            return
+        }
+
+        val combinedRaw = currentRaw.trimEnd() + "\n\n" + cleanAppend
+        val currentTitle = _uiState.value.bookTitle.ifBlank { "Văn bản đang đọc" }
+        _uiState.update {
+            it.copy(
+                rawText = combinedRaw,
+                bookTitle = currentTitle,
+                errorMessage = null
+            )
+        }
+
+        viewModelScope.launch {
+            val parsed = withContext(Dispatchers.Default) {
+                TextSplitter.parseBookContent(combinedRaw)
+            }
+            if (parsed.sentences.isNotEmpty()) {
+                val addedSentences = ttsManager?.appendBookContent(
+                    newParagraphs = parsed.paragraphs,
+                    newSentences = parsed.sentences,
+                    title = currentTitle,
+                    autoPlayIfFinished = autoPlayIfFinished
+                ) ?: 0
+                val savedIdx = ttsManager?.currentIndex?.value ?: _uiState.value.currentIndex
+                appContext?.let {
+                    ReaderPreferences.saveReadingSession(it, currentTitle, combinedRaw, savedIdx)
+                }
+                onAppended(addedSentences)
+            }
+        }
+    }
+
+    /**
+     * Nhận văn bản được chọn & chia sẻ từ ứng dụng khác trên điện thoại (Menu Chia sẻ / Chọn văn bản).
+     */
+    fun handleExternalSharedText(
+        sharedText: String,
+        append: Boolean
+    ) {
+        val cleaned = sharedText.trim()
+        if (cleaned.isBlank()) return
+
+        val title = if (append) {
+            _uiState.value.bookTitle.ifBlank { "Văn bản chia sẻ" }
+        } else {
+            "Văn bản được chia sẻ"
+        }
+
+        if (ttsManager == null) {
+            pendingSharedAction = PendingSharedAction(
+                text = cleaned,
+                append = append,
+                title = title
+            )
+            if (!append) {
+                _uiState.update { it.copy(rawText = cleaned, bookTitle = title, errorMessage = null) }
+            }
+            return
+        }
+
+        if (append) {
+            appendTextContent(
+                appendedRaw = cleaned,
+                autoPlayIfFinished = true
+            )
+        } else {
+            loadTextContent(
+                raw = cleaned,
+                title = title,
+                autoPlay = true
+            )
         }
     }
 

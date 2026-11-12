@@ -31,13 +31,48 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.NovelR">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Hiện NovelR trên Menu Chia sẻ (Share) khi bôi đen văn bản hoặc chia sẻ từ trình duyệt/app khác -->
+            <intent-filter android:label="NovelR (Đọc ngay)">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+
+            <!-- Hiện NovelR trực tiếp trên thanh menu nổi khi bôi đen văn bản (Process Text) -->
+            <intent-filter android:label="Đọc bằng NovelR">
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
+
+        <!-- Tùy chọn thứ 2 trên Menu Chia sẻ / Bôi đen: Dán nối tiếp thẳng vào cuối bài đang đọc -->
+        <activity-alias
+            android:name=".AppendShareAlias"
+            android:targetActivity=".MainActivity"
+            android:label="NovelR (Dán nối tiếp)"
+            android:icon="@mipmap/ic_launcher"
+            android:roundIcon="@mipmap/ic_launcher_round"
+            android:exported="true">
+            <intent-filter android:label="NovelR (Dán nối tiếp)">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter android:label="Nối tiếp vào NovelR">
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity-alias>
 
         <service
             android:name=".service.TtsAudioService"

@@ -13,6 +13,7 @@ import android.os.Bundle
 import android.os.IBinder
 import android.os.PowerManager
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -82,6 +83,9 @@ class MainActivity : ComponentActivity() {
         startService(serviceIntent)
         isServiceBound = bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
 
+        // Kiểm tra nếu app được mở từ Menu Chia sẻ (Share) hoặc Menu Bôi đen văn bản (Process Text)
+        handleIncomingTextIntent(intent)
+
         setContent {
             MaterialTheme {
                 Surface(color = MaterialTheme.colorScheme.background) {
@@ -99,6 +103,18 @@ class MainActivity : ComponentActivity() {
                                 activeSentenceIndex = uiState.currentIndex,
                                 onResumeActiveSession = { currentScreen = CurrentScreen.READER },
                                 onTextChanged = viewModel::onTextChanged,
+                                onAppendText = { clipText ->
+                                    viewModel.appendTextContent(
+                                        appendedRaw = clipText,
+                                        autoPlayIfFinished = true
+                                    )
+                                    Toast.makeText(
+                                        this@MainActivity,
+                                        "Đã dán nối tiếp vào cuối bài đang đọc",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                    currentScreen = CurrentScreen.READER
+                                },
                                 onPickTxtFile = { uri ->
                                     viewModel.loadTxtFile(
                                         context = this@MainActivity,
@@ -123,6 +139,12 @@ class MainActivity : ComponentActivity() {
                                         raw = clipText,
                                         title = "Văn bản từ Bộ nhớ tạm",
                                         autoPlay = true
+                                    )
+                                },
+                                onAppendClipboardText = { clipText ->
+                                    viewModel.appendTextContent(
+                                        appendedRaw = clipText,
+                                        autoPlayIfFinished = true
                                     )
                                 },
                                 onPickTxtFile = { uri ->
@@ -163,6 +185,57 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingTextIntent(intent)
+    }
+
+    /**
+     * Nhận đoạn văn bản khi người dùng bôi đen chữ trên điện thoại rồi ấn "Chia sẻ" (ACTION_SEND)
+     * hoặc chọn trực tiếp "Đọc bằng NovelR" trên menu nổi (ACTION_PROCESS_TEXT).
+     */
+    private fun handleIncomingTextIntent(incomingIntent: Intent?) {
+        val intent = incomingIntent ?: return
+        val action = intent.action ?: return
+
+        val extractedText: String? = when (action) {
+            Intent.ACTION_SEND -> {
+                intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+                    ?: intent.clipData?.takeIf { it.itemCount > 0 }
+                        ?.getItemAt(0)
+                        ?.coerceToText(this)
+                        ?.toString()
+            }
+            Intent.ACTION_PROCESS_TEXT -> {
+                intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString()
+                    ?: intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+            }
+            else -> null
+        }
+
+        if (!extractedText.isNullOrBlank()) {
+            val isAppendAlias = intent.component?.className?.endsWith("AppendShareAlias") == true
+            // Xóa action sau khi đã nhận để xoay màn hình không bị nạp lại
+            intent.action = Intent.ACTION_MAIN
+            intent.removeExtra(Intent.EXTRA_TEXT)
+            intent.removeExtra(Intent.EXTRA_PROCESS_TEXT)
+
+            currentScreen = CurrentScreen.READER
+            viewModel.handleExternalSharedText(
+                sharedText = extractedText,
+                append = isAppendAlias
+            )
+
+            val toastMsg = if (isAppendAlias) {
+                "Đã dán nối tiếp đoạn văn bản vừa chia sẻ vào NovelR"
+            } else {
+                "Đang đọc đoạn văn bản vừa chia sẻ vào NovelR"
+            }
+            Toast.makeText(this, toastMsg, Toast.LENGTH_SHORT).show()
         }
     }
 

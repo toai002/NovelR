@@ -1,5 +1,7 @@
 package com.novelr.reader.ui.screens
 
+import android.content.ClipboardManager as AndroidClipboardManager
+import android.content.Context
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -43,6 +45,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PostAdd
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Settings
@@ -177,6 +180,7 @@ fun ReaderScreen(
     uiState: ReaderUiState,
     onOpenTextEditor: () -> Unit,
     onPasteClipboardText: (String) -> Unit,
+    onAppendClipboardText: (String) -> Unit,
     onPickTxtFile: (Uri) -> Unit,
     onTogglePlayPause: () -> Unit,
     onNextSentence: () -> Unit,
@@ -367,13 +371,19 @@ fun ReaderScreen(
                             tint = palette.textPrimary
                         )
                     }
-                    // 2. Nút Dán nhanh từ Clipboard và đọc ngay lập tức kiểu @Voice Aloud Reader
+                    // 2. Nút Dán mới từ Clipboard và đọc ngay lập tức kiểu @Voice Aloud Reader
                     IconButton(
                         onClick = {
-                            val clipText = clipboardManager.getText()?.text
+                            val sysClip = (context.getSystemService(Context.CLIPBOARD_SERVICE) as? AndroidClipboardManager)
+                                ?.primaryClip
+                                ?.takeIf { it.itemCount > 0 }
+                                ?.getItemAt(0)
+                                ?.coerceToText(context)
+                                ?.toString()
+                            val clipText = clipboardManager.getText()?.text?.takeIf { it.isNotBlank() } ?: sysClip
                             if (!clipText.isNullOrBlank()) {
                                 onPasteClipboardText(clipText)
-                                Toast.makeText(context, "Đã dán văn bản từ bộ nhớ tạm", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Đã dán mới văn bản từ bộ nhớ tạm", Toast.LENGTH_SHORT).show()
                             } else {
                                 Toast.makeText(context, "Bộ nhớ tạm trống, hãy mở trình nhập văn bản", Toast.LENGTH_SHORT).show()
                                 onOpenTextEditor()
@@ -382,8 +392,32 @@ fun ReaderScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Default.ContentPaste,
-                            contentDescription = "Dán và đọc từ bộ nhớ tạm",
+                            contentDescription = "Dán mới và đọc từ bộ nhớ tạm",
                             tint = palette.textPrimary
+                        )
+                    }
+                    // 3. Nút Dán nối tiếp (Append) vào cuối đoạn văn bản đang đọc cạnh nút Dán cũ
+                    IconButton(
+                        onClick = {
+                            val sysClip = (context.getSystemService(Context.CLIPBOARD_SERVICE) as? AndroidClipboardManager)
+                                ?.primaryClip
+                                ?.takeIf { it.itemCount > 0 }
+                                ?.getItemAt(0)
+                                ?.coerceToText(context)
+                                ?.toString()
+                            val clipText = clipboardManager.getText()?.text?.takeIf { it.isNotBlank() } ?: sysClip
+                            if (!clipText.isNullOrBlank()) {
+                                onAppendClipboardText(clipText)
+                                Toast.makeText(context, "Đã dán nối tiếp vào cuối bài đang đọc", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "Bộ nhớ tạm trống, chưa có nội dung để dán nối tiếp", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PostAdd,
+                            contentDescription = "Dán nối tiếp vào cuối đoạn văn bản đang đọc",
+                            tint = palette.accentColor
                         )
                     }
                     // 3. Nút Mở trình Nhập / Chỉnh sửa văn bản đầy đủ
