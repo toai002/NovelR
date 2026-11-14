@@ -26,6 +26,7 @@ import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.novelr.reader.MainActivity
 import com.novelr.reader.model.PlaybackStatus
 import com.novelr.reader.model.TtsEngineType
@@ -187,7 +188,12 @@ class TtsAudioService : Service() {
                 addAction(Intent.ACTION_HEADSET_PLUG)
                 addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED)
             }
-            registerReceiver(headsetEventReceiver, filter)
+            ContextCompat.registerReceiver(
+                this,
+                headsetEventReceiver,
+                filter,
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
             isHeadsetReceiverRegistered = true
             Log.d(TAG, "Đã đăng ký HeadsetEventReceiver (Dây & Bluetooth Auto Play/Pause)")
         }
@@ -447,12 +453,20 @@ class TtsAudioService : Service() {
             android.R.drawable.ic_media_play
         }
 
+        val publicNotification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("$titlePrefix ($displayIndex / $total)")
+            .setContentText("Đang phát sách nói...")
+            .setSmallIcon(android.R.drawable.ic_lock_silent_mode_off)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .build()
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("$titlePrefix ($displayIndex / $total)")
             .setContentText(currentSentence)
             .setSmallIcon(android.R.drawable.ic_lock_silent_mode_off)
             .setContentIntent(contentIntent)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(publicNotification)
             .setOngoing(isPlaying)
             .addAction(android.R.drawable.ic_media_previous, "Câu trước", prevIntent)
             .addAction(playPauseIcon, if (isPlaying) "Tạm dừng" else "Đọc tiếp", playPauseIntent)

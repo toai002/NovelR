@@ -21,6 +21,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.FloatBuffer
 import java.nio.LongBuffer
+import javax.net.ssl.HttpsURLConnection
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -185,10 +186,17 @@ class PiperEngine(private val context: Context) {
                 val tempFile = File(modelDir, "${spec.fileName}.tmp")
                 if (tempFile.exists()) tempFile.delete()
 
-                downloadFileWithRedirects(spec.url, tempFile) { bytesRead ->
+                downloadFileWithRedirects(spec.url, tempFile, spec.expectedBytes) { bytesRead ->
                     completedBytes += bytesRead
                     val progress = (completedBytes.toFloat() / TOTAL_EXPECTED_BYTES).coerceIn(0.01f, 0.99f)
                     _downloadProgress.value = progress
+                }
+
+                if (tempFile.length() != spec.expectedBytes) {
+                    tempFile.delete()
+                    throw SecurityException(
+                        "Kích thước mô hình ${spec.fileName} không khớp chuẩn (${tempFile.length()} != ${spec.expectedBytes})"
+                    )
                 }
 
                 if (targetFile.exists()) targetFile.delete()
@@ -211,16 +219,21 @@ class PiperEngine(private val context: Context) {
     private fun downloadFileWithRedirects(
         urlStr: String,
         destination: File,
+        maxExpectedBytes: Long,
         onBytesRead: (Int) -> Unit
     ) {
         var currentUrl = urlStr
         var redirects = 0
         while (redirects < 8) {
-            val conn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
+            val parsedUrl = URL(currentUrl)
+            if (!parsedUrl.protocol.equals("https", ignoreCase = true)) {
+                throw SecurityException("Chỉ cho phép tải mô hình qua giao thức bảo mật HTTPS: $currentUrl")
+            }
+            val conn = (parsedUrl.openConnection() as HttpsURLConnection).apply {
                 connectTimeout = 20_000
                 readTimeout = 60_000
                 instanceFollowRedirects = false
-                setRequestProperty("User-Agent", "NovelR-Android/2.1")
+                setRequestProperty("User-Agent", "NovelR-Android/2.2")
             }
             try {
                 val status = conn.responseCode
@@ -234,7 +247,11 @@ class PiperEngine(private val context: Context) {
                 ) {
                     val location = conn.getHeaderField("Location")
                         ?: throw IllegalStateException("Redirect thiếu Location header")
-                    currentUrl = URL(URL(currentUrl), location).toString()
+                    val redirectedUrl = URL(parsedUrl, location)
+                    if (!redirectedUrl.protocol.equals("https", ignoreCase = true)) {
+                        throw SecurityException("Chặn chuyển hướng (redirect) sang giao thức không mã hóa HTTP")
+                    }
+                    currentUrl = redirectedUrl.toString()
                     conn.disconnect()
                     redirects++
                     continue
@@ -243,11 +260,17 @@ class PiperEngine(private val context: Context) {
                     throw IllegalStateException("HTTP $status khi tải $currentUrl")
                 }
 
+                val maxAllowedBytes = (maxExpectedBytes * 1.05).toLong()
+                var totalWritten = 0L
                 BufferedInputStream(conn.inputStream, 64 * 1024).use { input ->
                     FileOutputStream(destination).use { output ->
                         val buffer = ByteArray(64 * 1024)
                         var read: Int
                         while (input.read(buffer).also { read = it } != -1) {
+                            totalWritten += read
+                            if (totalWritten > maxAllowedBytes) {
+                                throw SecurityException("Dung lượng tải về vượt quá giới hạn cho phép")
+                            }
                             output.write(buffer, 0, read)
                             onBytesRead(read)
                         }

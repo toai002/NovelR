@@ -3,6 +3,8 @@ package com.novelr.reader.util
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.Charset
@@ -15,15 +17,19 @@ data class LoadedTxtDocument(
 
 object TxtFileLoader {
 
+    // Giới hạn kích thước file .txt tối đa 15 MB để chống tràn bộ nhớ (OutOfMemoryError / DoS)
+    private const val MAX_TXT_FILE_BYTES = 15 * 1024 * 1024
+    private const val MAX_FILENAME_LENGTH = 120
+
     /**
-     * Đọc nội dung file .txt từ Uri (Storage Access Framework) và tự động nhận diện bảng mã tiếng Việt
-     * (UTF-8, UTF-8 BOM, UTF-16LE, UTF-16BE, Windows-1258).
+     * Đọc nội dung file .txt từ Uri (Storage Access Framework) có giới hạn dung lượng an toàn
+     * và tự động nhận diện bảng mã tiếng Việt (UTF-8, UTF-8 BOM, UTF-16LE, UTF-16BE, Windows-1258).
      */
     fun loadFromUri(context: Context, uri: Uri): Result<LoadedTxtDocument> {
         return try {
             val fileName = resolveFileName(context, uri)
             val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
-                input.readBytes()
+                readBytesBounded(input, MAX_TXT_FILE_BYTES)
             } ?: return Result.failure(IllegalArgumentException("Không thể mở file đã chọn"))
 
             val decodedText = decodeVietnameseBytes(bytes)
@@ -38,20 +44,41 @@ object TxtFileLoader {
         }
     }
 
+    private fun readBytesBounded(input: InputStream, maxBytes: Int): ByteArray {
+        val out = ByteArrayOutputStream(64 * 1024)
+        val buffer = ByteArray(16 * 1024)
+        var total = 0
+        var read: Int
+        while (input.read(buffer).also { read = it } != -1) {
+            total += read
+            if (total > maxBytes) {
+                throw IllegalArgumentException("File .txt vượt quá giới hạn an toàn (tối đa 15 MB)")
+            }
+            out.write(buffer, 0, read)
+        }
+        return out.toByteArray()
+    }
+
     private fun resolveFileName(context: Context, uri: Uri): String {
-        try {
+        val rawName = try {
             context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) {
                     val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    if (idx >= 0) {
-                        val name = cursor.getString(idx)
-                        if (!name.isNullOrBlank()) return name
-                    }
-                }
+                    if (idx >= 0) cursor.getString(idx) else null
+                } else null
             }
         } catch (_: Exception) {
-        }
-        return uri.lastPathSegment?.substringAfterLast('/') ?: "Truyen.txt"
+            null
+        } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "Truyen.txt"
+
+        val sanitized = rawName
+            .substringAfterLast('/')
+            .substringAfterLast('\\')
+            .replace(Regex("[\\p{Cntrl}]"), "")
+            .trim()
+            .take(MAX_FILENAME_LENGTH)
+
+        return sanitized.ifBlank { "Truyen.txt" }
     }
 
     internal fun decodeVietnameseBytes(bytes: ByteArray): String {

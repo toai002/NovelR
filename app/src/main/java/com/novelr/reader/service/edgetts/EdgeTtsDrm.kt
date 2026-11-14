@@ -105,7 +105,9 @@ object EdgeTtsDrm {
             }
             val serverEpochSec = (sdf.parse(serverDateStr)?.time ?: return) / 1000.0
             val localEpochSec = System.currentTimeMillis() / 1000.0
-            clockSkewSeconds = serverEpochSec - localEpochSec
+            val rawSkew = serverEpochSec - localEpochSec
+            // Giới hạn độ lệch đồng hồ tối đa ±24 giờ để tránh bị đầu độc bởi Date header bất thường
+            clockSkewSeconds = rawSkew.coerceIn(-86_400.0, 86_400.0)
         } catch (_: Exception) {
         }
     }

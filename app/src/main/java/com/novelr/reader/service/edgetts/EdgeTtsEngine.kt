@@ -338,6 +338,11 @@ class EdgeTtsEngine(private val context: Context) {
         val pitchStr = if (pitchHz >= 0) "+${pitchHz}Hz" else "${pitchHz}Hz"
 
         val serverVoiceName = EdgeTtsConstants.toServerVoiceName(voiceShortName)
+            .replace("&", "&amp;")
+            .replace("'", "&apos;")
+            .replace("\"", "&quot;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
 
         val listener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {

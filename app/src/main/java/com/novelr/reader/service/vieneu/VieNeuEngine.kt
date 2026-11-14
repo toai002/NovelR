@@ -24,6 +24,7 @@ import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import java.nio.LongBuffer
 import java.util.Random
+import javax.net.ssl.HttpsURLConnection
 import kotlin.coroutines.coroutineContext
 import kotlin.math.PI
 import kotlin.math.abs
@@ -293,6 +294,7 @@ class VieNeuEngine(private val context: Context) {
                 downloadFileWithRedirects(
                     urlStr = fileUrl,
                     destination = tempFile,
+                    maxExpectedBytes = spec.expectedBytes,
                     onBytesRead = { bytesDelta ->
                         completedBytes += bytesDelta
                         val progress = (completedBytes.toFloat() / TOTAL_EXPECTED_BYTES).coerceIn(0.01f, 0.99f)
@@ -328,17 +330,22 @@ class VieNeuEngine(private val context: Context) {
     private fun downloadFileWithRedirects(
         urlStr: String,
         destination: File,
+        maxExpectedBytes: Long,
         onBytesRead: (Int) -> Unit
     ) {
         var currentUrl = urlStr
         var redirects = 0
 
         while (redirects < 8) {
-            val conn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
+            val parsedUrl = URL(currentUrl)
+            if (!parsedUrl.protocol.equals("https", ignoreCase = true)) {
+                throw SecurityException("Chỉ cho phép tải mô hình qua giao thức bảo mật HTTPS: $currentUrl")
+            }
+            val conn = (parsedUrl.openConnection() as HttpsURLConnection).apply {
                 connectTimeout = 20_000
                 readTimeout = 60_000
                 instanceFollowRedirects = false
-                setRequestProperty("User-Agent", "NovelR-Android/1.0")
+                setRequestProperty("User-Agent", "NovelR-Android/2.2")
             }
 
             try {
@@ -353,7 +360,11 @@ class VieNeuEngine(private val context: Context) {
                 ) {
                     val location = conn.getHeaderField("Location")
                         ?: throw IllegalStateException("Redirect không có Location header")
-                    currentUrl = URL(URL(currentUrl), location).toString()
+                    val redirectedUrl = URL(parsedUrl, location)
+                    if (!redirectedUrl.protocol.equals("https", ignoreCase = true)) {
+                        throw SecurityException("Chặn chuyển hướng (redirect) sang giao thức không mã hóa HTTP")
+                    }
+                    currentUrl = redirectedUrl.toString()
                     conn.disconnect()
                     redirects++
                     continue
@@ -363,11 +374,17 @@ class VieNeuEngine(private val context: Context) {
                     throw IllegalStateException("HTTP $status khi tải $currentUrl")
                 }
 
+                val maxAllowedBytes = (maxExpectedBytes * 1.15).toLong()
+                var totalWritten = 0L
                 BufferedInputStream(conn.inputStream, 64 * 1024).use { input ->
                     FileOutputStream(destination).use { output ->
                         val buffer = ByteArray(64 * 1024)
                         var read: Int
                         while (input.read(buffer).also { read = it } != -1) {
+                            totalWritten += read
+                            if (totalWritten > maxAllowedBytes) {
+                                throw SecurityException("Dung lượng tải về vượt quá giới hạn an toàn")
+                            }
                             output.write(buffer, 0, read)
                             onBytesRead(read)
                         }
@@ -522,7 +539,7 @@ class VieNeuEngine(private val context: Context) {
                     warmVoiceFilter = warmVoiceFilter
                 )
             } catch (e: Exception) {
-                Log.e(TAG, "Lỗi suy luận ONNX mệnh đề '$clause': ${e.message}", e)
+                Log.e(TAG, "Lỗi suy luận ONNX mệnh đề (độ dài ${clause.length}): ${e.message}", e)
                 ShortArray(0)
             }
             if (chunkPcm.isNotEmpty()) {

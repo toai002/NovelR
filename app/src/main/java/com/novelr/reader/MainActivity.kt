@@ -194,6 +194,11 @@ class MainActivity : ComponentActivity() {
         handleIncomingTextIntent(intent)
     }
 
+    companion object {
+        // Giới hạn độ dài văn bản nhận từ Intent bên ngoài để chống tràn bộ nhớ (DoS)
+        private const val MAX_SHARED_TEXT_CHARS = 300_000
+    }
+
     /**
      * Nhận đoạn văn bản khi người dùng bôi đen chữ trên điện thoại rồi ấn "Chia sẻ" (ACTION_SEND)
      * hoặc chọn trực tiếp "Đọc bằng NovelR" trên menu nổi (ACTION_PROCESS_TEXT).
@@ -202,7 +207,7 @@ class MainActivity : ComponentActivity() {
         val intent = incomingIntent ?: return
         val action = intent.action ?: return
 
-        val extractedText: String? = when (action) {
+        val rawExtractedText: String? = when (action) {
             Intent.ACTION_SEND -> {
                 intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
                     ?: intent.clipData?.takeIf { it.itemCount > 0 }
@@ -215,6 +220,10 @@ class MainActivity : ComponentActivity() {
                     ?: intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
             }
             else -> null
+        }
+
+        val extractedText = rawExtractedText?.let {
+            if (it.length > MAX_SHARED_TEXT_CHARS) it.take(MAX_SHARED_TEXT_CHARS) else it
         }
 
         if (!extractedText.isNullOrBlank()) {
