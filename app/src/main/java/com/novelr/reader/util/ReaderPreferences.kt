@@ -13,6 +13,7 @@ object ReaderPreferences {
     private const val KEY_VIENEU_VOICE = "vieneu_voice"
     private const val KEY_PIPER_VOICE = "piper_voice"
     private const val KEY_EDGE_VOICE = "edge_voice"
+    private const val KEY_EDGE_FAST_MIGRATED = "edge_fast_v225_migrated"
     private const val KEY_SYSTEM_VOICE = "system_voice"
     private const val KEY_SPEECH_RATE = "speech_rate"
     private const val KEY_PITCH = "pitch"
@@ -40,6 +41,18 @@ object ReaderPreferences {
             TtsEngineType.NATIVE_SYSTEM
         }
 
+        val migratedFastEdge = prefs.getBoolean(KEY_EDGE_FAST_MIGRATED, false)
+        val rawEdgeVoice = if (!migratedFastEdge) {
+            prefs.edit()
+                .putString(KEY_EDGE_VOICE, TtsSettings.DEFAULT_EDGE_VOICE)
+                .putBoolean(KEY_EDGE_FAST_MIGRATED, true)
+                .apply()
+            TtsSettings.DEFAULT_EDGE_VOICE
+        } else {
+            prefs.getString(KEY_EDGE_VOICE, TtsSettings.DEFAULT_EDGE_VOICE)
+                ?: TtsSettings.DEFAULT_EDGE_VOICE
+        }
+
         return TtsSettings(
             speechRate = prefs.getFloat(KEY_SPEECH_RATE, TtsSettings.DEFAULT_SPEECH_RATE).coerceIn(0.5f, 2.0f),
             pitch = prefs.getFloat(KEY_PITCH, TtsSettings.DEFAULT_PITCH).coerceIn(0.5f, 1.5f),
@@ -50,10 +63,7 @@ object ReaderPreferences {
                 ?: TtsSettings.DEFAULT_VIENEU_VOICE,
             selectedPiperVoice = prefs.getString(KEY_PIPER_VOICE, TtsSettings.DEFAULT_PIPER_VOICE)
                 ?: TtsSettings.DEFAULT_PIPER_VOICE,
-            selectedEdgeVoice = EdgeTtsConstants.findById(
-                prefs.getString(KEY_EDGE_VOICE, TtsSettings.DEFAULT_EDGE_VOICE)
-                    ?: TtsSettings.DEFAULT_EDGE_VOICE
-            ).id,
+            selectedEdgeVoice = EdgeTtsConstants.findById(rawEdgeVoice).id,
             lookaheadBufferSize = prefs.getInt(KEY_LOOKAHEAD, TtsSettings.DEFAULT_LOOKAHEAD).coerceIn(2, 12),
             sentencePauseMs = prefs.getInt(KEY_SENTENCE_PAUSE, TtsSettings.DEFAULT_SENTENCE_PAUSE_MS).coerceIn(200, 1200),
             clausePauseMs = prefs.getInt(KEY_CLAUSE_PAUSE, TtsSettings.DEFAULT_CLAUSE_PAUSE_MS).coerceIn(120, 600),

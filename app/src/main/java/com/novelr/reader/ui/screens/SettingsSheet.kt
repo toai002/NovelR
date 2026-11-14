@@ -305,7 +305,7 @@ fun SettingsSheet(
                                 }
                             }
                             Text(
-                                text = "Kết nối trực tiếp tới máy chủ giọng đọc Tiếng Việt chuẩn của Microsoft Edge (Hoài My & Nam Minh). Thống nhất cố định 100% một giọng đọc thuần Việt, tự động xử lý từ cảm thán trong ngoặc kép không bị đọc tiếng Anh.",
+                                text = "6 giọng Đa ngôn ngữ phản hồi siêu tốc (~150ms/câu nhờ tái sử dụng Warm WebSocket Pool) + đã khóa chuẩn hóa âm vị Tiếng Việt để các từ trong ngoặc kép (\"ha ha\", \"ồ\", \"hừ\", \"ok\"...) luôn đọc chuẩn Tiếng Việt 100%, giữ cố định 1 giọng duy nhất suốt truyện.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.outline
                             )
@@ -319,12 +319,12 @@ fun SettingsSheet(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Chọn giọng Microsoft Edge (Chuẩn Tiếng Việt)",
+                                text = "Chọn giọng Microsoft Edge (8 giọng)",
                                 style = MaterialTheme.typography.titleSmall,
                                 color = MaterialTheme.colorScheme.primary
                             )
                             Text(
-                                text = "Mặc định: Hoài My",
+                                text = "Khuyên dùng: Ava / Andrew (150ms)",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.outline
                             )

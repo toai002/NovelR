@@ -176,11 +176,38 @@ object TextSplitter {
             end = iterator.next()
         }
 
-        if (result.isNotEmpty()) return result
+        if (result.isNotEmpty()) {
+            return mergeShortInterjectionSentences(result)
+        }
 
         return trimmedPara.split(FALLBACK_PUNCTUATION_REGEX)
             .map { it.trim() }
             .filter { it.isNotEmpty() }
+    }
+
+    /**
+     * Gộp các câu cảm thán/tiếng cười quá ngắn (<= 2 từ hoặc <= 10 ký tự như `"Ha ha!"`, `"Ồ!"`, `"Hừ!"`, `"À?"`)
+     * vào câu kế tiếp trong cùng đoạn văn để giữ nguyên ngữ cảnh câu Tiếng Việt và đọc liền mạch tự nhiên.
+     */
+    private fun mergeShortInterjectionSentences(sentences: List<String>): List<String> {
+        if (sentences.size <= 1) return sentences
+        val merged = ArrayList<String>(sentences.size)
+        var i = 0
+        while (i < sentences.size) {
+            val current = sentences[i]
+            val words = countWords(current)
+            if ((words <= 2 || current.length <= 10) && i + 1 < sentences.size) {
+                val next = sentences[i + 1]
+                if (current.length + 1 + next.length <= MAX_SENTENCE_LENGTH) {
+                    merged.add("$current $next")
+                    i += 2
+                    continue
+                }
+            }
+            merged.add(current)
+            i++
+        }
+        return merged
     }
 
     /**

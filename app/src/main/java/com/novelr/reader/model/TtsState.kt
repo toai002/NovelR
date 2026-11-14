@@ -68,7 +68,7 @@ data class TtsSettings(
         const val DEFAULT_PITCH = 1.0f
         const val DEFAULT_VIENEU_VOICE = "duc_tri"
         const val DEFAULT_PIPER_VOICE = "vais_default"
-        const val DEFAULT_EDGE_VOICE = "vi-VN-HoaiMyNeural"
+        const val DEFAULT_EDGE_VOICE = "en-US-AvaMultilingualNeural"
         const val DEFAULT_LOOKAHEAD = 8
         const val DEFAULT_SENTENCE_PAUSE_MS = 550
         const val DEFAULT_CLAUSE_PAUSE_MS = 240
