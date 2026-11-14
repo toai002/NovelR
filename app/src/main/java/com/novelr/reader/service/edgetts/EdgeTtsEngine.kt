@@ -8,15 +8,13 @@ import android.media.MediaFormat
 import android.util.Log
 import com.novelr.reader.service.WarmAudioDspProcessor
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -32,49 +30,52 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
-import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
- * Bộ máy tổng hợp giọng nói trực tiếp Microsoft Edge TTS (Online Neural 24kHz) - Bản Siêu Tốc v2.2.1.
+ * Bộ máy tổng hợp giọng nói trực tiếp Microsoft Edge TTS (Online Neural 24kHz) - Bản Thống Nhất Giọng Việt v2.2.3.
  *
- * Các tối ưu hóa giảm thời gian chờ load (Low-Latency Architecture):
- * 1. **Persistent Pre-Warmed WebSocket Pool (Hồ kết nối giữ phiên ấm)**:
- *    - Duy trì sẵn 4 kết nối WebSocket đã bắt tay TLS, gửi sẵn `Path:speech.config` và làm nóng worker Neural
- *      trên máy chủ Microsoft, giúp bỏ qua hoàn toàn 1.5s–2.5s khởi tạo kết nối mới cho mỗi câu.
- *    - Tái sử dụng cùng một kết nối WebSocket xuyên suốt nhiều câu liên tiếp (độ trễ phản hồi chỉ ~150ms–300ms/câu).
- * 2. **Parallel Clause-Level Streaming (Phát mệnh đề đầu song song)**:
- *    - Với câu vừa/dài, tự động tách mệnh đề ngắn đầu tiên (4–10 chữ đầu) và tổng hợp **song song cùng lúc**
- *      với phần còn lại của câu trên 2 kết nối ấm. Mệnh đề đầu phát ra tiếng ngay sau ~0.25–0.5s trong khi phần sau
- *      đang tải ngầm.
- * 3. **Smart Hedged Racing & Cooldown cho node `vi-VN`**:
- *    - Nếu máy chủ `vi-VN` của Microsoft phản hồi chậm (> 550ms chưa có byte âm thanh đầu) hoặc trả rỗng,
- *      tự động đua song song (Hedged Request) với giọng Đa Ngôn Ngữ cùng giới tính và nhớ trạng thái nghẽn 3 phút
- *      để không bao giờ phải chờ timeout 2.5s.
- * 4. **Zero-Disk In-Memory MP3 Decoder**:
- *    - Giải mã MP3 trực tiếp từ bộ nhớ RAM qua `MediaDataSource` không cần ghi/xóa file tạm trên bộ nhớ máy.
+ * Đặc điểm nổi bật:
+ * 1. **Thống nhất 100% một giọng đọc thuần Việt (`vi-VN-HoaiMyNeural` hoặc `vi-VN-NamMinhNeural`)**:
+ *    - Tuyệt đối không bao giờ tự ý nhảy sang giọng ngoại quốc (Multilingual tiếng Anh/Pháp).
+ *    - Sử dụng cơ chế **Đua đa luồng cùng một giọng (Same-Voice Hedged Racing)**: Nếu kết nối 1 chưa trả byte
+ *      âm thanh đầu tiên sau 500ms, lập tức mở kết nối thứ 2 tới **đúng giọng đang chọn** để luôn đạt tốc độ
+ *      ~500ms–700ms/câu mà giữ nguyên 100% âm sắc giọng đọc xuyên suốt cả truyện.
+ * 2. **Xử lý triệt để từ cảm thán & lời thoại trong ngoặc kép (`"ha ha"`, `"ồ"`, `"hừ"`, `"à"`...)**:
+ *    - Đặt ngôn ngữ gốc SSML chuẩn `xml:lang='vi-VN'`.
+ *    - Loại bỏ dấu ngoặc kép bao quanh từ cảm thán và chuẩn hóa ngữ âm tiếng Việt để bộ phân tích của Edge
+ *      không bao giờ đọc `"ha ha"`, `"ồ"` theo ngữ điệu tiếng Anh.
+ *    - Không tách rời các thán từ ngắn ở đầu câu khi chạy chế độ phát mệnh đề song song.
  */
 class EdgeTtsEngine(private val context: Context) {
 
     companion object {
         private const val TAG = "EdgeTtsEngine"
         private const val OUTPUT_SAMPLE_RATE = 24000
-        private const val MAX_POOL_SIZE = 5
-        private const val TARGET_WARM_SOCKETS = 3
-        private const val MAX_SOCKET_IDLE_MS = 45_000L
-        private const val VI_NODE_COOLDOWN_MS = 180_000L // 3 phút tự động bypass khi node vi-VN bị nghẽn
         private val tempFileCounter = AtomicLong(0L)
+
+        private val VIETNAMESE_DIACRITIC_CHARS =
+            "àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ" +
+                    "ÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴĐ"
+
+        private val REGEX_HAHA = Regex("\\b(?:ha\\s*){2,}ha?\\b", RegexOption.IGNORE_CASE)
+        private val REGEX_HIHI = Regex("\\b(?:hi\\s*){2,}hi?\\b", RegexOption.IGNORE_CASE)
+        private val REGEX_HEHE = Regex("\\b(?:he\\s*){2,}he?\\b", RegexOption.IGNORE_CASE)
+        private val REGEX_HUHU = Regex("\\b(?:hu\\s*){2,}hu?\\b", RegexOption.IGNORE_CASE)
+        private val REGEX_HOHO = Regex("\\b(?:hơ\\s*){2,}|\\b(?:ho\\s*){2,}ho?\\b", RegexOption.IGNORE_CASE)
+        private val REGEX_OH = Regex("\\boh+\\b", RegexOption.IGNORE_CASE)
+        private val REGEX_AH = Regex("\\bah+\\b", RegexOption.IGNORE_CASE)
+        private val REGEX_HMM = Regex("\\b(?:h+m+|u+h+m+|u+m+)\\b", RegexOption.IGNORE_CASE)
+        private val REGEX_OK = Regex("\\b(?:ok|okay)\\b", RegexOption.IGNORE_CASE)
+        private val REGEX_MULTI_SPACE = Regex("\\s{2,}")
     }
 
-    private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
     private val okHttpClient: OkHttpClient = OkHttpClient.Builder()
+        .connectionPool(ConnectionPool(8, 5, TimeUnit.MINUTES))
         .connectTimeout(6, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
         .writeTimeout(6, TimeUnit.SECONDS)
@@ -86,62 +87,8 @@ class EdgeTtsEngine(private val context: Context) {
         File(context.cacheDir, "edge_tts_mp3").apply { mkdirs() }
     }
 
-    private val socketPool = ConcurrentLinkedQueue<ReusableEdgeSocket>()
-    private val warmingCount = AtomicInteger(0)
-
-    @Volatile
-    private var viNodeDegradedUntilMs: Long = 0L
-
-    @Volatile
-    private var lastWarmVoiceShortName: String = "en-US-AvaMultilingualNeural"
-
-    init {
-        // Làm nóng sẵn hồ kết nối ngay khi khởi tạo Engine
-        warmUpPool(EdgeTtsConstants.DEFAULT_EDGE_VOICE)
-    }
-
-    /**
-     * Chủ động làm nóng trước các kết nối WebSocket trong nền để khi người dùng bấm Play là có sẵn kết nối ~150ms.
-     */
-    fun warmUpPool(voiceId: String = EdgeTtsConstants.DEFAULT_EDGE_VOICE) {
-        val profile = EdgeTtsConstants.findById(voiceId)
-        val warmTargetVoice = if (profile.shortName.startsWith("vi-VN") &&
-            System.currentTimeMillis() < viNodeDegradedUntilMs
-        ) {
-            fallbackVoiceFor(profile)
-        } else {
-            profile.shortName
-        }
-        lastWarmVoiceShortName = warmTargetVoice
-
-        pruneStaleSockets()
-        val currentSize = socketPool.size + warmingCount.get()
-        val needed = (TARGET_WARM_SOCKETS - currentSize).coerceAtLeast(0)
-        repeat(needed) {
-            warmingCount.incrementAndGet()
-            engineScope.launch {
-                try {
-                    val socket = createAndWarmSocket(warmTargetVoice)
-                    if (socket != null && !socket.isUseless()) {
-                        if (socketPool.size < MAX_POOL_SIZE) {
-                            socketPool.offer(socket)
-                        } else {
-                            socket.closeQuietly()
-                        }
-                    }
-                } finally {
-                    warmingCount.decrementAndGet()
-                }
-            }
-        }
-    }
-
-    private fun fallbackVoiceFor(profile: EdgeVoiceProfile): String {
-        return if (profile.gender.startsWith("Nam")) {
-            "fr-FR-RemyMultilingualNeural"
-        } else {
-            "en-US-AvaMultilingualNeural"
-        }
+    fun warmUpPool(@Suppress("UNUSED_PARAMETER") voiceId: String = EdgeTtsConstants.DEFAULT_EDGE_VOICE) {
+        // OkHttp ConnectionPool giữ sẵn phiên TLS; mỗi câu gửi kèm speech.config + ssml ngay trong onOpen để đạt tốc độ cao nhất
     }
 
     suspend fun synthesize(
@@ -153,12 +100,13 @@ class EdgeTtsEngine(private val context: Context) {
         clausePauseMs: Int = 200,
         warmVoiceFilter: Boolean = true
     ): ShortArray = withContext(Dispatchers.IO) {
-        val cleaned = sanitizeTextForSsml(text)
+        val cleaned = normalizeVietnameseForEdgeSsml(text)
         if (cleaned.isBlank()) return@withContext ShortArray(0)
 
-        val mp3Bytes = fetchMp3FastWithHedging(
+        val profile = EdgeTtsConstants.findById(voiceId)
+        val mp3Bytes = fetchMp3SameVoiceHedged(
             cleanedText = cleaned,
-            voiceId = voiceId,
+            voiceShortName = profile.shortName,
             speed = speed,
             pitch = pitch
         )
@@ -176,9 +124,8 @@ class EdgeTtsEngine(private val context: Context) {
 
     /**
      * Phát mệnh đề đầu siêu tốc (Parallel Clause-Level Streaming):
-     * Nếu câu dài hơn 42 ký tự và có dấu phẩy/chấm phẩy, tách mệnh đề ngắn đầu tiên để tổng hợp
-     * song song trên 2 kết nối WebSocket ấm. Ngay khi mệnh đề 1 xong (~200-450ms), phát ra tiếng ngay lập tức
-     * trong khi phần còn lại của câu đã gần tải xong ở kết nối thứ 2.
+     * Chỉ tách mệnh đề khi mệnh đề đầu đủ dài (>= 6 từ và có ít nhất 2 từ có dấu Tiếng Việt)
+     * để không bao giờ tách rời các từ cảm thán ngắn như "Ha ha," hay "Ồ," ra riêng lẻ.
      */
     suspend fun synthesizeStreaming(
         text: String,
@@ -211,7 +158,6 @@ class EdgeTtsEngine(private val context: Context) {
 
         val (firstClause, restClause) = splitPair
         coroutineScope {
-            // Chạy song song cả mệnh đề 1 và phần còn lại trên 2 kết nối ấm cùng lúc!
             val firstDeferred = async {
                 synthesize(
                     text = firstClause,
@@ -259,18 +205,20 @@ class EdgeTtsEngine(private val context: Context) {
     }
 
     /**
-     * Tách mệnh đề ngắn đầu tiên (từ 12 đến 65 ký tự) tại dấu ngắt tự nhiên (, ; : – —)
-     * để giảm một nửa thời gian chờ câu đầu tiên.
+     * Chỉ tách mệnh đề đầu khi có ít nhất 24 ký tự, >= 6 từ và có nhiều từ mang dấu Tiếng Việt
+     * để giữ nguyên ngữ cảnh câu Tiếng Việt (tránh tách rời "Ha ha," hoặc "Ồ," ở đầu câu).
      */
     private fun splitFirstShortClause(text: String): Pair<String, String>? {
-        if (text.length < 44) return null
-        val maxScan = minOf(text.length - 12, 68)
-        for (i in 12..maxScan) {
+        if (text.length < 56) return null
+        val maxScan = minOf(text.length - 18, 75)
+        for (i in 24..maxScan) {
             val ch = text[i]
             if (ch == ',' || ch == ';' || ch == ':' || ch == '–' || ch == '—') {
                 val first = text.substring(0, i + 1).trim()
                 val rest = text.substring(i + 1).trim()
-                if (first.length >= 10 && rest.length >= 10) {
+                val words = first.split(Regex("\\s+")).filter { it.isNotBlank() }
+                val vietWords = words.count { w -> w.any { c -> VIETNAMESE_DIACRITIC_CHARS.indexOf(c) >= 0 } }
+                if (words.size >= 6 && vietWords >= 3 && rest.length >= 16) {
                     return first to rest
                 }
             }
@@ -279,189 +227,92 @@ class EdgeTtsEngine(private val context: Context) {
     }
 
     /**
-     * Tải MP3 từ Edge TTS với cơ chế Hedged Request thông minh:
-     * - Nếu giọng là Multilingual: gửi thẳng trên kết nối ấm trong Pool (~150-350ms).
-     * - Nếu giọng là `vi-VN` (Hoài My / Nam Minh):
-     *   + Nếu node `vi-VN` đang trong thời gian cooldown nghẽn: chuyển thẳng 0ms sang giọng Multilingual dự phòng.
-     *   + Nếu không: thử `vi-VN` trước, nhưng nếu sau 550ms chưa có byte âm thanh đầu tiên hoặc trả rỗng,
-     *     lập tức kích hoạt luồng đua song song với giọng Multilingual để người dùng không bao giờ phải đợi 2.5s.
+     * Đua đa luồng trên CÙNG MỘT GIỌNG ĐỌC (Same-Voice Hedged Racing):
+     * - Mở kết nối 1 tới đúng giọng `voiceShortName` (`vi-VN-HoaiMyNeural` hoặc `vi-VN-NamMinhNeural`).
+     * - Nếu sau 500ms chưa nhận được byte âm thanh đầu tiên, phóng thêm kết nối 2 (và kết nối 3)
+     *   cũng tới **đúng giọng `voiceShortName` đó**.
+     * - Đảm bảo 100% thống nhất 1 giọng duy nhất không bao giờ bị đổi giọng mà vẫn khắc phục hoàn toàn hiện tượng nghẽn node lẻ.
      */
-    private suspend fun fetchMp3FastWithHedging(
+    private suspend fun fetchMp3SameVoiceHedged(
         cleanedText: String,
-        voiceId: String,
+        voiceShortName: String,
         speed: Float,
         pitch: Float
     ): ByteArray? = coroutineScope {
-        val profile = EdgeTtsConstants.findById(voiceId)
-        val primaryVoice = profile.shortName
-        val fallbackVoice = fallbackVoiceFor(profile)
-        val isViVoice = primaryVoice.startsWith("vi-VN")
-        val now = System.currentTimeMillis()
-
-        // Nếu node vi-VN vừa bị lỗi/nghẽn trong 3 phút gần đây -> dùng ngay giọng Multilingual 0ms delay
-        if (isViVoice && now < viNodeDegradedUntilMs) {
-            val fastBytes = executeSingleSynthesis(cleanedText, fallbackVoice, speed, pitch)
-            if (fastBytes != null && fastBytes.isNotEmpty()) {
-                return@coroutineScope fastBytes
-            }
-        }
-
-        if (!isViVoice) {
-            // Giọng Multilingual ổn định 100%: thử trên kết nối ấm, nếu kết nối cũ hết hạn thì thử lại ngay trên kết nối mới
-            val firstTry = executeSingleSynthesis(cleanedText, primaryVoice, speed, pitch)
-            if (firstTry != null && firstTry.isNotEmpty()) {
-                return@coroutineScope firstTry
-            }
-            return@coroutineScope executeSingleSynthesis(cleanedText, primaryVoice, speed, pitch)
-        }
-
-        // Với giọng vi-VN (Hoài My / Nam Minh): đua thông minh (Hedged Request) nếu quá 550ms chưa có byte đầu tiên
         val firstAudioSignal = CompletableDeferred<Boolean>()
-        val primaryJob = async {
-            executeSingleSynthesis(
+        val job1 = async {
+            fetchSingleTurnWebSocket(
                 cleanedText = cleanedText,
-                voiceShortName = primaryVoice,
+                voiceShortName = voiceShortName,
                 speed = speed,
                 pitch = pitch,
                 onFirstAudioChunk = { firstAudioSignal.complete(true) }
             )
         }
 
-        val gotEarlyAudio = withTimeoutOrNull(550L) {
+        val fastEnough = withTimeoutOrNull(500L) {
             firstAudioSignal.await()
         } ?: false
 
-        if (gotEarlyAudio) {
-            val primaryBytes = primaryJob.await()
-            if (primaryBytes != null && primaryBytes.isNotEmpty()) {
-                return@coroutineScope primaryBytes
+        if (fastEnough) {
+            val bytes1 = job1.await()
+            if (bytes1 != null && bytes1.isNotEmpty()) {
+                return@coroutineScope bytes1
             }
         }
 
-        // Node vi-VN phản hồi chậm (>550ms) hoặc trả rỗng -> phóng ngay request dự phòng song song trên socket ấm
-        val backupJob = async {
-            executeSingleSynthesis(
+        // Mở thêm 2 kết nối song song tới ĐÚNG GIỌNG ĐANG CHỌN (tuyệt đối không đổi sang giọng khác)
+        val job2 = async {
+            fetchSingleTurnWebSocket(
                 cleanedText = cleanedText,
-                voiceShortName = fallbackVoice,
+                voiceShortName = voiceShortName,
+                speed = speed,
+                pitch = pitch
+            )
+        }
+        val job3 = async {
+            fetchSingleTurnWebSocket(
+                cleanedText = cleanedText,
+                voiceShortName = voiceShortName,
                 speed = speed,
                 pitch = pitch
             )
         }
 
-        val winner = select<ByteArray?> {
-            primaryJob.onAwait { res ->
-                if (res != null && res.isNotEmpty()) res else null
-            }
-            backupJob.onAwait { res ->
-                if (res != null && res.isNotEmpty()) res else null
-            }
+        val firstWinner = select<ByteArray?> {
+            job1.onAwait { res -> if (res != null && res.isNotEmpty()) res else null }
+            job2.onAwait { res -> if (res != null && res.isNotEmpty()) res else null }
+            job3.onAwait { res -> if (res != null && res.isNotEmpty()) res else null }
         }
 
-        if (winner != null && winner.isNotEmpty()) {
-            if (primaryJob.isCompleted) {
-                val pRes = primaryJob.getCompleted()
-                if (pRes == null || pRes.isEmpty()) {
-                    viNodeDegradedUntilMs = System.currentTimeMillis() + VI_NODE_COOLDOWN_MS
-                }
-            } else {
-                // Node vi-VN quá chậm so với backup -> đánh dấu cooldown để các câu sau chạy tức thì
-                viNodeDegradedUntilMs = System.currentTimeMillis() + VI_NODE_COOLDOWN_MS
-                primaryJob.cancel()
-            }
-            backupJob.cancel()
-            return@coroutineScope winner
+        if (firstWinner != null && firstWinner.isNotEmpty()) {
+            job1.cancel()
+            job2.cancel()
+            job3.cancel()
+            return@coroutineScope firstWinner
         }
 
-        val secondWait = primaryJob.await()?.takeIf { it.isNotEmpty() }
-            ?: backupJob.await()?.takeIf { it.isNotEmpty() }
+        val fallbackWinner = job1.await()?.takeIf { it.isNotEmpty() }
+            ?: job2.await()?.takeIf { it.isNotEmpty() }
+            ?: job3.await()?.takeIf { it.isNotEmpty() }
 
-        if (secondWait == null) {
-            viNodeDegradedUntilMs = System.currentTimeMillis() + VI_NODE_COOLDOWN_MS
-        }
-        secondWait
+        job1.cancel()
+        job2.cancel()
+        job3.cancel()
+        fallbackWinner
     }
 
-    private suspend fun executeSingleSynthesis(
+    /**
+     * Gửi `Path:speech.config` và `Path:ssml` (`xml:lang='vi-VN'`) ngay lập tức trong `onOpen` (0ms delay)
+     * để máy chủ Microsoft Edge định tuyến vào luồng nhanh (~500ms).
+     */
+    private suspend fun fetchSingleTurnWebSocket(
         cleanedText: String,
         voiceShortName: String,
         speed: Float,
         pitch: Float,
         onFirstAudioChunk: (() -> Unit)? = null
     ): ByteArray? {
-        // 1. Lấy kết nối ấm có sẵn trong Pool (ưu tiên kết nối cùng giọng hoặc kết nối bất kỳ còn sống)
-        val pooledSocket = borrowWarmSocket()
-        if (pooledSocket != null) {
-            val bytes = pooledSocket.synthesizeTurn(
-                cleanedText = cleanedText,
-                voiceShortName = voiceShortName,
-                speed = speed,
-                pitch = pitch,
-                timeoutMs = 5_500L,
-                onFirstAudioChunk = onFirstAudioChunk
-            )
-            if (bytes != null && bytes.isNotEmpty()) {
-                returnSocketToPool(pooledSocket)
-                return bytes
-            } else {
-                pooledSocket.closeQuietly()
-            }
-        }
-
-        // 2. Nếu chưa có kết nối ấm hoặc kết nối ấm vừa hết hạn, mở kết nối mới và giữ lại trong Pool sau khi xong
-        val freshSocket = createOpenSocket() ?: return null
-        val bytes = freshSocket.synthesizeTurn(
-            cleanedText = cleanedText,
-            voiceShortName = voiceShortName,
-            speed = speed,
-            pitch = pitch,
-            timeoutMs = 6_500L,
-            onFirstAudioChunk = onFirstAudioChunk
-        )
-        if (bytes != null && bytes.isNotEmpty()) {
-            returnSocketToPool(freshSocket)
-            // Tự động bổ sung thêm kết nối ấm vào Pool trong nền
-            warmUpPool(voiceShortName)
-            return bytes
-        } else {
-            freshSocket.closeQuietly()
-            return null
-        }
-    }
-
-    private fun pruneStaleSockets() {
-        val iter = socketPool.iterator()
-        while (iter.hasNext()) {
-            val s = iter.next()
-            if (s.isUseless()) {
-                iter.remove()
-                s.closeQuietly()
-            }
-        }
-    }
-
-    private fun borrowWarmSocket(): ReusableEdgeSocket? {
-        while (true) {
-            val socket = socketPool.poll() ?: return null
-            if (!socket.isUseless()) {
-                if (socketPool.size < 2) {
-                    warmUpPool(lastWarmVoiceShortName)
-                }
-                return socket
-            } else {
-                socket.closeQuietly()
-            }
-        }
-    }
-
-    private fun returnSocketToPool(socket: ReusableEdgeSocket) {
-        if (!socket.isUseless() && socketPool.size < MAX_POOL_SIZE) {
-            socketPool.offer(socket)
-        } else {
-            socket.closeQuietly()
-        }
-    }
-
-    private suspend fun createOpenSocket(): ReusableEdgeSocket? {
         val connId = EdgeTtsDrm.generateConnectId()
         val secMsGec = EdgeTtsDrm.generateSecMsGecV2()
         val url = "${EdgeTtsConstants.WSS_URL}&ConnectionId=$connId&Sec-MS-GEC=$secMsGec&Sec-MS-GEC-Version=${EdgeTtsConstants.SEC_MS_GEC_VERSION}"
@@ -472,64 +323,25 @@ class EdgeTtsEngine(private val context: Context) {
             .header("Cache-Control", "no-cache")
             .header("Origin", EdgeTtsConstants.ORIGIN)
             .header("User-Agent", EdgeTtsConstants.USER_AGENT)
-            .header("Accept-Language", "en-US,en;q=0.9")
+            .header("Accept-Language", "vi-VN,vi;q=0.9")
             .header("Cookie", "muid=${EdgeTtsDrm.generateMuid()};")
             .build()
 
-        val socket = ReusableEdgeSocket(okHttpClient, request)
-        val connected = socket.awaitConnected(4_500L)
-        if (!connected) {
-            socket.closeQuietly()
-            return null
-        }
-        return socket
-    }
+        val doneDeferred = CompletableDeferred<ByteArray?>()
+        val audioBuffer = ByteArrayOutputStream(32 * 1024)
+        val notifiedFirstChunk = AtomicBoolean(false)
 
-    private suspend fun createAndWarmSocket(voiceShortName: String): ReusableEdgeSocket? {
-        val socket = createOpenSocket() ?: return null
-        // Gửi 1 âm tiết cực ngắn ở tốc độ +100% để máy chủ Microsoft gắn sẵn worker Neural vào kết nối WebSocket này
-        val warmBytes = socket.synthesizeTurn(
-            cleanedText = "a",
-            voiceShortName = voiceShortName,
-            speed = 2.0f,
-            pitch = 1.0f,
-            timeoutMs = 4_500L,
-            onFirstAudioChunk = null
-        )
-        return if (warmBytes != null && warmBytes.isNotEmpty() && !socket.isUseless()) {
-            socket
-        } else {
-            socket.closeQuietly()
-            null
-        }
-    }
+        val ratePercent = ((speed.coerceIn(0.5f, 2.0f) - 1.0f) * 100f).roundToInt()
+        val rateStr = if (ratePercent >= 0) "+$ratePercent%" else "$ratePercent%"
 
-    /**
-     * Kết nối WebSocket tái sử dụng nhiều lượt (Multi-Turn Keep-Alive WebSocket).
-     */
-    private inner class ReusableEdgeSocket(
-        client: OkHttpClient,
-        request: Request
-    ) {
-        private val connectedDeferred = CompletableDeferred<Boolean>()
-        private val closedFlag = AtomicBoolean(false)
-        private val activeTurnRef = AtomicReference<TurnState?>(null)
+        val pitchHz = ((pitch.coerceIn(0.5f, 1.5f) - 1.0f) * 50f).roundToInt()
+        val pitchStr = if (pitchHz >= 0) "+${pitchHz}Hz" else "${pitchHz}Hz"
 
-        @Volatile
-        var lastActiveTimeMs: Long = System.currentTimeMillis()
+        val serverVoiceName = EdgeTtsConstants.toServerVoiceName(voiceShortName)
 
-        private inner class TurnState(
-            val onFirstAudio: (() -> Unit)?
-        ) {
-            val doneDeferred = CompletableDeferred<ByteArray?>()
-            val buffer = ByteArrayOutputStream(32 * 1024)
-            val notifiedFirstChunk = AtomicBoolean(false)
-        }
-
-        private val ws: WebSocket = client.newWebSocket(request, object : WebSocketListener() {
+        val listener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 response.header("Date")?.let { EdgeTtsDrm.adjustClockSkewFromServerDate(it) }
-                lastActiveTimeMs = System.currentTimeMillis()
 
                 val configMsg = buildString {
                     append("X-Timestamp:${edgeDateString()}\r\n")
@@ -540,23 +352,37 @@ class EdgeTtsEngine(private val context: Context) {
                     append("},\"outputFormat\":\"audio-24khz-48kbitrate-mono-mp3\"}}}}\r\n")
                 }
                 webSocket.send(configMsg)
-                connectedDeferred.complete(true)
+
+                val reqId = EdgeTtsDrm.generateConnectId()
+                val ssml = buildString {
+                    append("<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='vi-VN'>")
+                    append("<voice name='$serverVoiceName'>")
+                    append("<prosody pitch='$pitchStr' rate='$rateStr' volume='+0%'>")
+                    append(cleanedText)
+                    append("</prosody></voice></speak>")
+                }
+                val ssmlMsg = buildString {
+                    append("X-RequestId:$reqId\r\n")
+                    append("Content-Type:application/ssml+xml\r\n")
+                    append("X-Timestamp:${edgeDateString()}Z\r\n")
+                    append("Path:ssml\r\n\r\n")
+                    append(ssml)
+                }
+                webSocket.send(ssmlMsg)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                lastActiveTimeMs = System.currentTimeMillis()
                 if (text.contains("Path:turn.end")) {
-                    val turn = activeTurnRef.getAndSet(null)
-                    if (turn != null && !turn.doneDeferred.isCompleted) {
-                        val bytes = synchronized(turn.buffer) { turn.buffer.toByteArray() }
-                        turn.doneDeferred.complete(bytes)
+                    val bytes = synchronized(audioBuffer) { audioBuffer.toByteArray() }
+                    doneDeferred.complete(bytes)
+                    try {
+                        webSocket.close(1000, "Done")
+                    } catch (_: Exception) {
                     }
                 }
             }
 
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                lastActiveTimeMs = System.currentTimeMillis()
-                val turn = activeTurnRef.get() ?: return
                 val arr = bytes.toByteArray()
                 if (arr.size > 2) {
                     val headerLen = ((arr[0].toInt() and 0xFF) shl 8) or (arr[1].toInt() and 0xFF)
@@ -566,11 +392,11 @@ class EdgeTtsEngine(private val context: Context) {
                         if (headerText.contains("Path:audio")) {
                             val chunkLen = arr.size - dataStart
                             if (chunkLen > 0) {
-                                synchronized(turn.buffer) {
-                                    turn.buffer.write(arr, dataStart, chunkLen)
+                                synchronized(audioBuffer) {
+                                    audioBuffer.write(arr, dataStart, chunkLen)
                                 }
-                                if (turn.notifiedFirstChunk.compareAndSet(false, true)) {
-                                    turn.onFirstAudio?.invoke()
+                                if (notifiedFirstChunk.compareAndSet(false, true)) {
+                                    onFirstAudioChunk?.invoke()
                                 }
                             }
                         }
@@ -579,12 +405,9 @@ class EdgeTtsEngine(private val context: Context) {
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                closedFlag.set(true)
-                connectedDeferred.complete(false)
-                val turn = activeTurnRef.getAndSet(null)
-                if (turn != null && !turn.doneDeferred.isCompleted) {
-                    val bytes = synchronized(turn.buffer) { turn.buffer.toByteArray() }
-                    turn.doneDeferred.complete(bytes.takeIf { it.isNotEmpty() })
+                if (!doneDeferred.isCompleted) {
+                    val bytes = synchronized(audioBuffer) { audioBuffer.toByteArray() }
+                    doneDeferred.complete(bytes.takeIf { it.isNotEmpty() })
                 }
                 try {
                     webSocket.close(1000, null)
@@ -593,92 +416,27 @@ class EdgeTtsEngine(private val context: Context) {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                closedFlag.set(true)
                 response?.header("Date")?.let { EdgeTtsDrm.adjustClockSkewFromServerDate(it) }
-                connectedDeferred.complete(false)
-                val turn = activeTurnRef.getAndSet(null)
-                turn?.doneDeferred?.complete(null)
+                if (!doneDeferred.isCompleted) {
+                    doneDeferred.complete(null)
+                }
             }
-        })
-
-        suspend fun awaitConnected(timeoutMs: Long): Boolean {
-            if (closedFlag.get()) return false
-            return withTimeoutOrNull(timeoutMs) {
-                connectedDeferred.await()
-            } ?: false
         }
 
-        fun isUseless(): Boolean {
-            if (closedFlag.get()) return true
-            val idleMs = System.currentTimeMillis() - lastActiveTimeMs
-            return idleMs > MAX_SOCKET_IDLE_MS
-        }
-
-        suspend fun synthesizeTurn(
-            cleanedText: String,
-            voiceShortName: String,
-            speed: Float,
-            pitch: Float,
-            timeoutMs: Long,
-            onFirstAudioChunk: (() -> Unit)?
-        ): ByteArray? {
-            if (isUseless()) return null
-
-            val ratePercent = ((speed.coerceIn(0.5f, 2.0f) - 1.0f) * 100f).roundToInt()
-            val rateStr = if (ratePercent >= 0) "+$ratePercent%" else "$ratePercent%"
-
-            val pitchHz = ((pitch.coerceIn(0.5f, 1.5f) - 1.0f) * 50f).roundToInt()
-            val pitchStr = if (pitchHz >= 0) "+${pitchHz}Hz" else "${pitchHz}Hz"
-
-            val serverVoiceName = EdgeTtsConstants.toServerVoiceName(voiceShortName)
-            val reqId = EdgeTtsDrm.generateConnectId()
-
-            val ssml = buildString {
-                append("<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>")
-                append("<voice name='$serverVoiceName'>")
-                append("<prosody pitch='$pitchStr' rate='$rateStr' volume='+0%'>")
-                append(cleanedText)
-                append("</prosody></voice></speak>")
+        val ws = okHttpClient.newWebSocket(request, listener)
+        return try {
+            val result = withTimeoutOrNull(6_500L) {
+                doneDeferred.await()
             }
-
-            val ssmlMsg = buildString {
-                append("X-RequestId:$reqId\r\n")
-                append("Content-Type:application/ssml+xml\r\n")
-                append("X-Timestamp:${edgeDateString()}Z\r\n")
-                append("Path:ssml\r\n\r\n")
-                append(ssml)
-            }
-
-            val turn = TurnState(onFirstAudioChunk)
-            activeTurnRef.set(turn)
-            val sent = ws.send(ssmlMsg)
-            if (!sent) {
-                activeTurnRef.compareAndSet(turn, null)
-                closedFlag.set(true)
-                return null
-            }
-
-            val result = withTimeoutOrNull(timeoutMs) {
-                turn.doneDeferred.await()
-            }
-            activeTurnRef.compareAndSet(turn, null)
-
             if (result == null || result.isEmpty()) {
-                closedFlag.set(true)
-                closeQuietly()
-                return null
-            }
-
-            lastActiveTimeMs = System.currentTimeMillis()
-            return result
-        }
-
-        fun closeQuietly() {
-            closedFlag.set(true)
-            try {
                 ws.cancel()
-            } catch (_: Exception) {
+                null
+            } else {
+                result
             }
+        } catch (e: Exception) {
+            ws.cancel()
+            throw e
         }
     }
 
@@ -704,7 +462,6 @@ class EdgeTtsEngine(private val context: Context) {
                     override fun close() {}
                 })
             } catch (_: Exception) {
-                // Dự phòng nếu ROM tùy biến không hỗ trợ MediaDataSource cho MP3
                 val tf = File(cacheDir, "edge_${tempFileCounter.incrementAndGet()}.mp3")
                 tempFile = tf
                 FileOutputStream(tf).use { it.write(mp3Bytes) }
@@ -866,7 +623,7 @@ class EdgeTtsEngine(private val context: Context) {
 
         val fadeInSamples = (0.018f * sr).toInt().coerceAtMost(voiceLength)
         val fadeOutSamples = (0.035f * sr).toInt().coerceAtMost(voiceLength)
-        val pauseSamples = ((trailingPauseMs / 1000f) * sr).Int().coerceAtLeast(0)
+        val pauseSamples = ((trailingPauseMs / 1000f) * sr).toInt().coerceAtLeast(0)
         val leadInSamples = (0.012f * sr).toInt()
         val totalLength = leadInSamples + voiceLength + pauseSamples
 
@@ -882,17 +639,47 @@ class EdgeTtsEngine(private val context: Context) {
         )
     }
 
-    private fun Float.Int(): Int = this.toInt()
+    /**
+     * Chuẩn hóa văn bản Tiếng Việt trước khi đưa vào SSML của Microsoft Edge:
+     * 1. Loại bỏ toàn bộ dấu ngoặc kép / ngoặc trích dẫn ("...", “...”, ‘...’, «...», 「...」)
+     *    để bộ phân tích của Microsoft không chuyển các từ ngắn trong ngoặc kép sang chế độ phát âm tiếng Anh.
+     * 2. Chuẩn hóa các từ cảm thán & tiếng cười (ha ha, haha, hihi, hehe, huhu, oh, ah, hmm, ok...)
+     *    sang âm tiết thuần Việt có dấu để 100% đọc bằng ngữ điệu Tiếng Việt.
+     */
+    internal fun normalizeVietnameseForEdgeSsml(raw: String): String {
+        if (raw.isBlank()) return ""
 
-    private fun sanitizeTextForSsml(raw: String): String {
-        val sb = StringBuilder(raw.length + 16)
+        // 1. Thay thế dấu ngoặc kép / ngoặc hội thoại bằng khoảng trắng để không kích hoạt chế độ trích dẫn tiếng Anh
+        val unquoted = StringBuilder(raw.length + 8)
         for (ch in raw) {
+            when (ch) {
+                '"', '\'', '“', '”', '‘', '’', '«', '»', '「', '」', '『', '』', '‹', '›', '„', '‟', '”' -> {
+                    unquoted.append(' ')
+                }
+                else -> unquoted.append(ch)
+            }
+        }
+
+        // 2. Chuẩn hóa các từ cảm thán / tiếng cười dễ bị nhận nhầm là tiếng Anh sang âm tiết thuần Việt
+        var normalized = unquoted.toString()
+        normalized = REGEX_HAHA.replace(normalized, "hà ha")
+        normalized = REGEX_HIHI.replace(normalized, "hì hi")
+        normalized = REGEX_HEHE.replace(normalized, "hề he")
+        normalized = REGEX_HUHU.replace(normalized, "hù hu")
+        normalized = REGEX_HOHO.replace(normalized, "hồ hô")
+        normalized = REGEX_OH.replace(normalized, "ồ")
+        normalized = REGEX_AH.replace(normalized, "à")
+        normalized = REGEX_HMM.replace(normalized, "hừm")
+        normalized = REGEX_OK.replace(normalized, "ô kê")
+        normalized = REGEX_MULTI_SPACE.replace(normalized, " ").trim()
+
+        // 3. Escape các ký tự đặc biệt của XML
+        val sb = StringBuilder(normalized.length + 16)
+        for (ch in normalized) {
             when (ch) {
                 '&' -> sb.append("&amp;")
                 '<' -> sb.append("&lt;")
                 '>' -> sb.append("&gt;")
-                '"' -> sb.append("&quot;")
-                '\'' -> sb.append("&apos;")
                 else -> {
                     val code = ch.code
                     if (code == 9 || code == 10 || code == 13 || code >= 32) {

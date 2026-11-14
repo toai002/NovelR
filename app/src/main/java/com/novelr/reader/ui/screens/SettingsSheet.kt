@@ -305,7 +305,7 @@ fun SettingsSheet(
                                 }
                             }
                             Text(
-                                text = "Kết nối trực tiếp tới máy chủ giọng đọc Neural của Microsoft Edge (chuẩn bảo mật Sec-MS-GEC v2). Bao gồm Hoài My, Nam Minh và 6 giọng Đa Ngôn Ngữ đọc mượt cả tiếng Việt lẫn tên tiếng Anh.",
+                                text = "Kết nối trực tiếp tới máy chủ giọng đọc Tiếng Việt chuẩn của Microsoft Edge (Hoài My & Nam Minh). Thống nhất cố định 100% một giọng đọc thuần Việt, tự động xử lý từ cảm thán trong ngoặc kép không bị đọc tiếng Anh.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.outline
                             )
@@ -319,7 +319,7 @@ fun SettingsSheet(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Chọn giọng Microsoft Edge (8 giọng Neural)",
+                                text = "Chọn giọng Microsoft Edge (Chuẩn Tiếng Việt)",
                                 style = MaterialTheme.typography.titleSmall,
                                 color = MaterialTheme.colorScheme.primary
                             )

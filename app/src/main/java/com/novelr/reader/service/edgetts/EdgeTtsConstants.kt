@@ -19,64 +19,26 @@ object EdgeTtsConstants {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0"
     const val ORIGIN = "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold"
 
-    const val DEFAULT_EDGE_VOICE = "en-US-AvaMultilingualNeural"
+    const val DEFAULT_EDGE_VOICE = "vi-VN-HoaiMyNeural"
 
+    /**
+     * Danh sách giọng đọc Microsoft Edge TTS thuần Tiếng Việt (vi-VN) thống nhất 100%,
+     * tuyệt đối không pha trộn giọng đa ngôn ngữ tiếng Anh.
+     */
     val PRESET_VOICES = listOf(
-        EdgeVoiceProfile(
-            id = "en-US-AvaMultilingualNeural",
-            shortName = "en-US-AvaMultilingualNeural",
-            name = "Ava Đa Ngôn Ngữ (Siêu tốc)",
-            gender = "Nữ • Việt-Anh • Khuyên dùng",
-            description = "Giọng nữ đa ngôn ngữ phản hồi siêu nhanh (~0.2s) • Đọc tiếng Việt & tên tiếng Anh cực mượt"
-        ),
-        EdgeVoiceProfile(
-            id = "fr-FR-VivienneMultilingualNeural",
-            shortName = "fr-FR-VivienneMultilingualNeural",
-            name = "Vivienne Đa Ngôn Ngữ (Siêu tốc)",
-            gender = "Nữ • Thanh lịch • Nhanh",
-            description = "Giọng nữ đa ngôn ngữ tốc độ cao, âm sắc sang trọng, đọc rõ từng chữ"
-        ),
-        EdgeVoiceProfile(
-            id = "fr-FR-RemyMultilingualNeural",
-            shortName = "fr-FR-RemyMultilingualNeural",
-            name = "Remy Đa Ngôn Ngữ (Siêu tốc)",
-            gender = "Nam • Trầm sâu • Khuyên dùng",
-            description = "Giọng nam đa ngôn ngữ phản hồi nhanh, trầm dày, hợp đọc truyện kiếm hiệp / tiên hiệp"
-        ),
-        EdgeVoiceProfile(
-            id = "en-US-EmmaMultilingualNeural",
-            shortName = "en-US-EmmaMultilingualNeural",
-            name = "Emma Đa Ngôn Ngữ",
-            gender = "Nữ • Dịu êm",
-            description = "Giọng nữ đa ngôn ngữ nhẹ nhàng, truyền cảm, nghe lâu không mỏi tai"
-        ),
-        EdgeVoiceProfile(
-            id = "en-US-BrianMultilingualNeural",
-            shortName = "en-US-BrianMultilingualNeural",
-            name = "Brian Đa Ngôn Ngữ",
-            gender = "Nam • Sáng rõ",
-            description = "Giọng nam đa ngôn ngữ trẻ trung, phát âm dứt khoát, tốc độ phản hồi nhanh"
-        ),
-        EdgeVoiceProfile(
-            id = "en-US-AndrewMultilingualNeural",
-            shortName = "en-US-AndrewMultilingualNeural",
-            name = "Andrew Đa Ngôn Ngữ",
-            gender = "Nam • Việt-Anh",
-            description = "Giọng nam đa ngôn ngữ ấm áp • Đọc tiểu thuyết có tên nước ngoài cực chuẩn"
-        ),
         EdgeVoiceProfile(
             id = "vi-VN-HoaiMyNeural",
             shortName = "vi-VN-HoaiMyNeural",
-            name = "Hoài My (Chuẩn Edge)",
-            gender = "Nữ • Tiếng Việt",
-            description = "Giọng nữ Tiếng Việt chính thức của Microsoft Edge • Tự động tăng tốc dự phòng khi nghẽn"
+            name = "Hoài My (Nữ • Chuẩn Tiếng Việt)",
+            gender = "Nữ • Tiếng Việt chuẩn Edge",
+            description = "Giọng nữ Tiếng Việt chính thức của Microsoft Edge • Đọc rõ chữ, tự nhiên, thống nhất 100% âm sắc Việt"
         ),
         EdgeVoiceProfile(
             id = "vi-VN-NamMinhNeural",
             shortName = "vi-VN-NamMinhNeural",
-            name = "Nam Minh (Chuẩn Edge)",
-            gender = "Nam • Tiếng Việt",
-            description = "Giọng nam Tiếng Việt chính thức của Microsoft Edge • Tự động tăng tốc dự phòng khi nghẽn"
+            name = "Nam Minh (Nam • Chuẩn Tiếng Việt)",
+            gender = "Nam • Tiếng Việt chuẩn Edge",
+            description = "Giọng nam Tiếng Việt chính thức của Microsoft Edge • Trầm ấm, đĩnh đạc, thống nhất 100% âm sắc Việt"
         )
     )
 
@@ -85,8 +47,8 @@ object EdgeTtsConstants {
     }
 
     /**
-     * Chuyển mã ngắn (vd: "en-US-AvaMultilingualNeural") sang định dạng chuẩn của Microsoft Edge Server:
-     * "Microsoft Server Speech Text to Speech Voice (en-US, AvaMultilingualNeural)"
+     * Chuyển mã ngắn (vd: "vi-VN-HoaiMyNeural") sang định dạng chuẩn của Microsoft Edge Server:
+     * "Microsoft Server Speech Text to Speech Voice (vi-VN, HoaiMyNeural)"
      */
     fun toServerVoiceName(shortName: String): String {
         val parts = shortName.split("-")

@@ -4,6 +4,7 @@ import android.content.Context
 import com.novelr.reader.model.ReadingTheme
 import com.novelr.reader.model.TtsEngineType
 import com.novelr.reader.model.TtsSettings
+import com.novelr.reader.service.edgetts.EdgeTtsConstants
 
 object ReaderPreferences {
     private const val PREF_NAME = "novelr_reader_prefs"
@@ -49,8 +50,10 @@ object ReaderPreferences {
                 ?: TtsSettings.DEFAULT_VIENEU_VOICE,
             selectedPiperVoice = prefs.getString(KEY_PIPER_VOICE, TtsSettings.DEFAULT_PIPER_VOICE)
                 ?: TtsSettings.DEFAULT_PIPER_VOICE,
-            selectedEdgeVoice = prefs.getString(KEY_EDGE_VOICE, TtsSettings.DEFAULT_EDGE_VOICE)
-                ?: TtsSettings.DEFAULT_EDGE_VOICE,
+            selectedEdgeVoice = EdgeTtsConstants.findById(
+                prefs.getString(KEY_EDGE_VOICE, TtsSettings.DEFAULT_EDGE_VOICE)
+                    ?: TtsSettings.DEFAULT_EDGE_VOICE
+            ).id,
             lookaheadBufferSize = prefs.getInt(KEY_LOOKAHEAD, TtsSettings.DEFAULT_LOOKAHEAD).coerceIn(2, 12),
             sentencePauseMs = prefs.getInt(KEY_SENTENCE_PAUSE, TtsSettings.DEFAULT_SENTENCE_PAUSE_MS).coerceIn(200, 1200),
             clausePauseMs = prefs.getInt(KEY_CLAUSE_PAUSE, TtsSettings.DEFAULT_CLAUSE_PAUSE_MS).coerceIn(120, 600),
