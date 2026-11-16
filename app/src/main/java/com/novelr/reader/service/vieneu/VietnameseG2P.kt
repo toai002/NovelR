@@ -38,6 +38,18 @@ class VietnameseG2P(private val context: Context) {
             "[cough]" to "<|emotion_3|>"
         )
 
+        private val REGEX_HAHA = Regex("\\b(?:ha\\s*){2,}ha?\\b", RegexOption.IGNORE_CASE)
+        private val REGEX_HIHI = Regex("\\b(?:hi\\s*){2,}hi?\\b", RegexOption.IGNORE_CASE)
+        private val REGEX_HEHE = Regex("\\b(?:he\\s*){2,}he?\\b", RegexOption.IGNORE_CASE)
+        private val REGEX_HUHU = Regex("\\b(?:hu\\s*){2,}hu?\\b", RegexOption.IGNORE_CASE)
+        private val REGEX_HOHO = Regex("\\b(?:hơ\\s*){2,}|\\b(?:ho\\s*){2,}ho?\\b|\\b(?:hô\\s*){2,}hô?\\b", RegexOption.IGNORE_CASE)
+        private val REGEX_KAKA = Regex("\\b(?:ka\\s*){2,}ka?\\b", RegexOption.IGNORE_CASE)
+        private val REGEX_OH = Regex("\\boh+\\b", RegexOption.IGNORE_CASE)
+        private val REGEX_AH = Regex("\\bah+\\b", RegexOption.IGNORE_CASE)
+        private val REGEX_HMM = Regex("\\b(?:h+m+|u+h+m+|u+m+)\\b", RegexOption.IGNORE_CASE)
+        private val REGEX_OK = Regex("\\b(?:ok|okay)\\b", RegexOption.IGNORE_CASE)
+        private val REGEX_ALO = Regex("\\balo+\\b", RegexOption.IGNORE_CASE)
+
         // Từ điển tên nhân vật tiểu thuyết phương Tây, Fantasy, Light Novel, Anime phổ biến không có sẵn trong từ điển ngắn
         private val EXTRA_NOVEL_NAMES_IPA = mapOf(
             "arthur" to "ˈɑːɹθɚ",
@@ -287,11 +299,22 @@ class VietnameseG2P(private val context: Context) {
         if (rawText.isBlank()) return ""
         val dict = getOrLoadDictionary()
 
-        // 1. Chuẩn hóa Unicode NFC và thay thế các thẻ cảm xúc
+        // 1. Chuẩn hóa Unicode NFC, thay thế thẻ cảm xúc và chuẩn hóa từ cảm thán / tiếng cười thuần Việt
         var text = Normalizer.normalize(rawText.trim(), Normalizer.Form.NFC)
         for ((tag, token) in EMOTION_REPLACEMENTS) {
             text = text.replace(tag, " $token ", ignoreCase = true)
         }
+        text = REGEX_HAHA.replace(text, "hà ha")
+        text = REGEX_HIHI.replace(text, "hì hi")
+        text = REGEX_HEHE.replace(text, "hề he")
+        text = REGEX_HUHU.replace(text, "hù hu")
+        text = REGEX_HOHO.replace(text, "hồ hô")
+        text = REGEX_KAKA.replace(text, "khà khà")
+        text = REGEX_OH.replace(text, "ồ")
+        text = REGEX_AH.replace(text, "à")
+        text = REGEX_HMM.replace(text, "hừm")
+        text = REGEX_OK.replace(text, "ô kê")
+        text = REGEX_ALO.replace(text, "a lô")
 
         // 2. Xử lý sở hữu cách Tiếng Anh trên tên nhân vật (ví dụ: "Arthur's" -> "Arthur 's")
         text = text.replace(Regex("""([A-Za-z]+)['’]s\b"""), "$1_possessive_s")
