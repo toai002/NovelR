@@ -544,6 +544,9 @@ class TtsManager(
 
     private fun speakWithOnDeviceNeural(index: Int) {
         vieneuSynthesisJob?.cancel()
+        // Các bộ máy 24kHz (Edge TTS, Piper, VieNeu) đã xử lý EQ phòng thu 3 dải tần trực tiếp trên PCM,
+        // tắt bộ lọc phần cứng trùng lặp trên AudioSession để giữ trọn độ trong trẻo của dải tần cao (3.5kHz-12kHz).
+        warmAudioDsp.setEnabled(false)
         val list = _sentences.value
         if (index !in list.indices) return
 
@@ -622,7 +625,9 @@ class TtsManager(
         _settings.value = newSettings
         ReaderPreferences.saveSettings(context, newSettings)
 
-        warmAudioDsp.setEnabled(newSettings.warmVoiceFilter)
+        warmAudioDsp.setEnabled(
+            newSettings.warmVoiceFilter && newSettings.engineType == TtsEngineType.NATIVE_SYSTEM
+        )
         textToSpeech?.let { applySettingsToNative(it, newSettings) }
 
         val engineTypeChanged = oldSettings.engineType != newSettings.engineType
@@ -739,7 +744,9 @@ class TtsManager(
 
         tts.setSpeechRate(settings.speechRate)
         tts.setPitch(settings.pitch.coerceIn(0.5f, 1.5f))
-        warmAudioDsp.setEnabled(settings.warmVoiceFilter)
+        warmAudioDsp.setEnabled(
+            settings.warmVoiceFilter && settings.engineType == TtsEngineType.NATIVE_SYSTEM
+        )
     }
 
     fun release() {

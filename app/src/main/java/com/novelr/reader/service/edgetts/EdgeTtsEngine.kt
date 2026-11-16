@@ -957,7 +957,7 @@ class EdgeTtsEngine(private val context: Context) {
             }
 
             return if (sampleRate != OUTPUT_SAMPLE_RATE && sampleRate > 0) {
-                resampleLinear(monoFloats, sampleRate.toFloat(), OUTPUT_SAMPLE_RATE.toFloat())
+                resampleHermite(monoFloats, sampleRate.toFloat(), OUTPUT_SAMPLE_RATE.toFloat())
             } else {
                 monoFloats
             }
@@ -976,18 +976,32 @@ class EdgeTtsEngine(private val context: Context) {
         }
     }
 
-    private fun resampleLinear(input: FloatArray, srcRate: Float, dstRate: Float): FloatArray {
-        if (input.isEmpty()) return input
+    /**
+     * Nội suy đa thức bậc 3 Hermite (4-point Cubic Hermite Interpolation) giúp tái lấy mẫu sang 24kHz
+     * giữ nguyên độ sắc nét của dải tần cao và phụ âm, không bị mờ tiếng như nội suy tuyến tính.
+     */
+    private fun resampleHermite(input: FloatArray, srcRate: Float, dstRate: Float): FloatArray {
+        if (input.size < 4) return input
         val ratio = srcRate / dstRate
         val outLen = (input.size / ratio).toInt().coerceAtLeast(1)
         val out = FloatArray(outLen)
         val maxIdx = input.size - 1
         for (i in 0 until outLen) {
             val pos = i * ratio
-            val idx = pos.toInt().coerceIn(0, maxIdx)
-            val nextIdx = (idx + 1).coerceIn(0, maxIdx)
+            val idx = pos.toInt()
             val frac = pos - idx
-            out[i] = input[idx] * (1f - frac) + input[nextIdx] * frac
+
+            val y0 = input[(idx - 1).coerceIn(0, maxIdx)]
+            val y1 = input[idx.coerceIn(0, maxIdx)]
+            val y2 = input[(idx + 1).coerceIn(0, maxIdx)]
+            val y3 = input[(idx + 2).coerceIn(0, maxIdx)]
+
+            val c0 = y1
+            val c1 = 0.5f * (y2 - y0)
+            val c2 = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3
+            val c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2)
+
+            out[i] = ((c3 * frac + c2) * frac + c1) * frac + c0
         }
         return out
     }

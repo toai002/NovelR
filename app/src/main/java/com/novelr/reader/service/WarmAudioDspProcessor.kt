@@ -7,15 +7,18 @@ import android.util.Log
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.pow
 import kotlin.math.sin
-import kotlin.math.sqrt
 import kotlin.math.tanh
 
 /**
- * Bộ xử lý âm thanh chống chói tai (De-Esser & Anti-Harshness DSP) thế hệ mới:
- * - TUYỆT ĐỐI KHÔNG hạ cao độ (Pitch = 100% nguyên bản) để giữ nguyên thanh điệu tiếng Việt và độ tự nhiên của giọng.
- * - Chỉ tác động vào dải tần số gây chói tai của tai người (3.4 kHz – 7.5 kHz, vùng âm xuýt s/x/ch/tr và cộng hưởng loa điện thoại)
- *   bằng bộ lọc Dynamic Split-Band De-Esser kết hợp Android DynamicsProcessing / Equalizer trên AudioSession.
+ * Bộ xử lý âm thanh chuẩn Phòng thu Sách nói (Studio Audiobook Mastering DSP & Dynamic De-Esser):
+ * - Giữ nguyên 100% cao độ (Pitch = 100% nguyên bản) và độ mở dải tần cao (Air band 8kHz–12kHz).
+ * - Tái tạo chất âm dày ấm, trong trẻo bằng chuỗi Biquad Studio 3 dải tần:
+ *   1. **Low-Mid Warmth Boost (165 Hz, +1.8 dB)**: Tăng độ dày và độ ấm lồng ngực (chest resonance).
+ *   2. **Vocal Presence & Clarity (2.650 Hz, +1.4 dB)**: Tăng độ rõ chữ và độ sắc nét của thanh điệu Tiếng Việt.
+ *   3. **Dynamic Split-Band De-Esser (4.800 Hz)**: Chỉ làm mềm khi có gai âm xuýt mạnh (s, x, ch, tr),
+ *      giữ nguyên 100% độ sáng trong trẻo (unity gain 1.0f) ở các âm tiết bình thường.
  */
 class WarmAudioDspProcessor(
     private val audioSessionId: Int
@@ -23,11 +26,57 @@ class WarmAudioDspProcessor(
     companion object {
         private const val TAG = "WarmAudioDsp"
 
+        private class BiquadFilter(
+            sr: Double,
+            f0: Double,
+            q: Double,
+            dbGain: Double
+        ) {
+            private val nb0: Float
+            private val nb1: Float
+            private val nb2: Float
+            private val na1: Float
+            private val na2: Float
+
+            private var x1 = 0f
+            private var x2 = 0f
+            private var y1 = 0f
+            private var y2 = 0f
+
+            init {
+                val a = 10.0.pow(dbGain / 40.0)
+                val w0 = 2.0 * PI * f0 / sr
+                val cosW0 = cos(w0)
+                val alpha = sin(w0) / (2.0 * q)
+
+                val b0 = 1.0 + alpha * a
+                val b1 = -2.0 * cosW0
+                val b2 = 1.0 - alpha * a
+                val a0 = 1.0 + alpha / a
+                val a1 = -2.0 * cosW0
+                val a2 = 1.0 - alpha / a
+
+                nb0 = (b0 / a0).toFloat()
+                nb1 = (b1 / a0).toFloat()
+                nb2 = (b2 / a0).toFloat()
+                na1 = (a1 / a0).toFloat()
+                na2 = (a2 / a0).toFloat()
+            }
+
+            fun process(input: Float): Float {
+                val out = nb0 * input + nb1 * x1 + nb2 * x2 - na1 * y1 - na2 * y2
+                x2 = x1
+                x1 = input
+                y2 = y1
+                y1 = out
+                return out
+            }
+        }
+
         /**
-         * Xử lý PCM 24kHz bằng thuật toán Split-Band Dynamic De-Esser + Biquad Presence Softener:
-         * 1. Tách riêng dải tần giọng chính (< 3.4 kHz) và dải tần chói/âm xuýt (> 3.4 kHz).
-         * 2. Giữ nguyên 100% độ trong trẻo và cao độ (pitch) của dải giọng chính (< 3.4 kHz) để tiếng không bị đục hay méo.
-         * 3. Chỉ nén động (Dynamic De-Essing) khi dải > 3.4 kHz vượt ngưỡng chói tai, đồng thời làm mềm đỉnh sóng bằng đường cong Soft-Knee.
+         * Xử lý PCM 24kHz với chuỗi Studio Mastering EQ (165Hz Warmth + 2.65kHz Clarity + 4.8kHz Dynamic De-Esser):
+         * - Không làm đục dải tần cao (giữ nguyên hfGain = 1.0f khi không có âm xuýt gắt).
+         * - Nâng biên độ chuẩn đầu ra lên 32000f kèm Soft-Knee Mastering Limiter giúp âm thanh to, rõ, tròn tiếng.
          */
         fun processPcm24kHz(
             wav: FloatArray,
@@ -51,85 +100,60 @@ class WarmAudioDspProcessor(
                 return pcm
             }
 
-            // Thiết kế bộ lọc Biquad Peaking Notch nhẹ ở 4500 Hz (tần số gây chói tai nhất trên loa điện thoại)
-            // Sample rate = 24000 Hz, f0 = 4500 Hz, Q = 1.15, Gain = -3.8 dB
             val sr = 24000.0
-            val f0 = 4500.0
-            val q = 1.15
-            val dbGain = -3.8
-            val a = Math.pow(10.0, dbGain / 40.0)
-            val w0 = 2.0 * PI * f0 / sr
-            val cosW0 = cos(w0)
-            val alpha = sin(w0) / (2.0 * q)
+            // 1. Tăng độ trầm ấm lồng ngực (165 Hz, +1.8 dB)
+            val warmthFilter = BiquadFilter(sr = sr, f0 = 165.0, q = 0.85, dbGain = 1.8)
+            // 2. Tăng độ rõ chữ & độ nét nguyên âm Tiếng Việt (2650 Hz, +1.4 dB)
+            val clarityFilter = BiquadFilter(sr = sr, f0 = 2650.0, q = 1.10, dbGain = 1.4)
+            // 3. Làm dịu nhẹ đỉnh cộng hưởng gắt của loa điện thoại (4800 Hz, -1.8 dB)
+            val harshNotchFilter = BiquadFilter(sr = sr, f0 = 4800.0, q = 1.40, dbGain = -1.8)
 
-            val b0 = 1.0 + alpha * a
-            val b1 = -2.0 * cosW0
-            val b2 = 1.0 - alpha * a
-            val a0 = 1.0 + alpha / a
-            val a1 = -2.0 * cosW0
-            val a2 = 1.0 - alpha / a
-
-            val nb0 = (b0 / a0).toFloat()
-            val nb1 = (b1 / a0).toFloat()
-            val nb2 = (b2 / a0).toFloat()
-            val na1 = (a1 / a0).toFloat()
-            val na2 = (a2 / a0).toFloat()
-
-            var x1 = 0f
-            var x2 = 0f
-            var y1 = 0f
-            var y2 = 0f
-
-            // Bộ tách tần bậc 1 ở 3400 Hz để đo năng lượng âm xuýt (Dynamic De-Esser)
-            // alpha_lp = exp(-2*pi*3400/24000) ≈ 0.41f
+            // Bộ tách tần ở 3800 Hz để chỉ nén động khi âm gió (s, x, ch) vượt ngưỡng cao
             var lpState = 0f
             var hfEnvelope = 0f
-            val lpCoeff = 0.41f
-            val sibilanceThreshold = 0.085f
+            val lpCoeff = 0.37f
+            val sibilanceThreshold = 0.11f
 
             for (i in 0 until voiceLength) {
                 val raw = wav[startIdx + i]
 
-                // Bước 1: Biquad Notch làm dịu vùng cộng hưởng 4.5 kHz mà không làm mờ dải trung (mid)
-                val notched = nb0 * raw + nb1 * x1 + nb2 * x2 - na1 * y1 - na2 * y2
-                x2 = x1
-                x1 = raw
-                y2 = y1
-                y1 = notched
+                // Chuỗi 3 bộ lọc Biquad chuẩn phòng thu
+                val s1 = warmthFilter.process(raw)
+                val s2 = clarityFilter.process(s1)
+                val eqSample = harshNotchFilter.process(s2)
 
-                // Bước 2: Tách dải giọng chính (< 3.4 kHz) và dải âm cao (> 3.4 kHz)
-                lpState = lpCoeff * lpState + (1f - lpCoeff) * notched
+                // Tách dải giọng chính (< 3.8 kHz) và dải tần cao (3.8 kHz – 12 kHz)
+                lpState = lpCoeff * lpState + (1f - lpCoeff) * eqSample
                 val lowMidBand = lpState
-                val highSibilanceBand = notched - lowMidBand
+                val highBand = eqSample - lowMidBand
 
-                // Bước 3: Đo đường bao năng lượng cao tần (Attack nhanh 0.25, Release mượt 0.02)
-                val absHigh = abs(highSibilanceBand)
+                val absHigh = abs(highBand)
                 hfEnvelope = if (absHigh > hfEnvelope) {
                     0.75f * hfEnvelope + 0.25f * absHigh
                 } else {
                     0.98f * hfEnvelope + 0.02f * absHigh
                 }
 
-                // Chỉ giảm biên độ dải cao tần khi thực sự có gai âm chói (s, x, ch, tr), giữ nguyên 100% nguyên âm
+                // Giữ nguyên 100% dải tần cao (1.0f) để âm thanh sáng rõ; chỉ nén nhẹ khi vượt ngưỡng âm xuýt
                 val hfGain = if (hfEnvelope > sibilanceThreshold) {
                     val excess = hfEnvelope - sibilanceThreshold
-                    (sibilanceThreshold + excess * 0.35f) / hfEnvelope
+                    (sibilanceThreshold + excess * 0.45f) / hfEnvelope
                 } else {
-                    0.88f // Hạ nhẹ 1dB ở dải siêu cao để êm tai khi nghe lâu
+                    1.0f
                 }
 
-                var sample = lowMidBand + highSibilanceBand * hfGain
+                var sample = lowMidBand + highBand * hfGain
 
-                // Bước 4: Soft-knee saturator nhẹ ở ngưỡng > 0.85 để chống vỡ tiếng (clipping) trên loa điện thoại
+                // Soft-knee studio limiter ở ngưỡng > 0.88 để âm lượng dày và không bao giờ vỡ tiếng
                 val absVal = abs(sample)
-                if (absVal > 0.85f) {
+                if (absVal > 0.88f) {
                     val sign = if (sample >= 0f) 1f else -1f
-                    val compressed = 0.85f + 0.14f * tanh(((absVal - 0.85f) / 0.14f).toDouble()).toFloat()
+                    val compressed = 0.88f + 0.11f * tanh(((absVal - 0.88f) / 0.11f).toDouble()).toFloat()
                     sample = sign * compressed
                 }
 
                 sample = applyFadeEnvelope(sample, i, voiceLength, fadeInSamples, fadeOutSamples)
-                pcm[leadInSamples + i] = (sample * 31200f).toInt().coerceIn(-32768, 32767).toShort()
+                pcm[leadInSamples + i] = (sample * 32200f).toInt().coerceIn(-32768, 32767).toShort()
             }
 
             return pcm
@@ -161,8 +185,9 @@ class WarmAudioDspProcessor(
     private var equalizer: Equalizer? = null
 
     /**
-     * Kích hoạt hoặc tắt bộ lọc chống chói phần cứng cho AudioSession (áp dụng cho cả Giọng Hệ Thống & VieNeu).
-     * Hoàn toàn không thay đổi Pitch mà dùng Multi-Band Compressor (De-Esser) + Post-EQ ở dải 3.2kHz - 7kHz.
+     * Kích hoạt bộ lọc phần cứng trên AudioSession dành riêng cho Giọng Hệ Thống (Native Android TTS).
+     * Khi chạy các bộ máy AI 24kHz (Edge TTS, Piper, VieNeu) vốn đã xử lý qua [processPcm24kHz],
+     * tắt bộ lọc phần cứng trùng lặp để giữ trọn độ trong trẻo của dải tần cao (3.5kHz – 12kHz).
      */
     fun setEnabled(enabled: Boolean) {
         if (audioSessionId <= 0) return
@@ -180,7 +205,7 @@ class WarmAudioDspProcessor(
                 equalizer?.enabled = enabled
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Không thể bật DSP chống chói trên session $audioSessionId: ${e.message}")
+            Log.w(TAG, "Không thể bật DSP trên session $audioSessionId: ${e.message}")
         }
     }
 
@@ -191,22 +216,22 @@ class WarmAudioDspProcessor(
             val cfg = DynamicsProcessing.Config.Builder(
                 DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION,
                 1,
-                true, bandCount, // Pre-EQ 5 băng tần
-                true, bandCount, // Multi-Band Compressor (De-Esser tự động ở dải cao)
+                true, bandCount,
+                true, bandCount,
                 false, 0,
-                true             // Limiter chống vọt đỉnh âm gây chói
+                true
             ).build()
 
             val dp = DynamicsProcessing(0, audioSessionId, cfg)
 
-            // Cấu hình 5 dải tần số:
-            // Band 0 (0 - 280 Hz): +1.0 dB (Tăng nhẹ độ ấm lồng ngực tự nhiên)
-            // Band 1 (280 - 1400 Hz): 0.0 dB (Giữ nguyên 100% độ rõ của giọng nói)
-            // Band 2 (1400 - 3200 Hz): -0.8 dB (Giữ độ nét nhưng giảm gắt nhẹ)
-            // Band 3 (3200 - 6500 Hz): -3.5 dB + Nén động De-Esser mạnh (Triệt tiêu vùng tần số gây chói tai nhất)
-            // Band 4 (6500 - 12000 Hz): -2.5 dB + Nén động De-Esser (Làm mượt âm xuýt s, x, ch)
-            val cutoffs = floatArrayOf(280f, 1400f, 3200f, 6500f, 12000f)
-            val eqGains = floatArrayOf(1.0f, 0.0f, -0.8f, -3.5f, -2.5f)
+            // Cấu hình 5 dải tần số cân bằng ấm & sáng rõ:
+            // Band 0 (0 - 250 Hz): +1.6 dB (Tăng độ ấm trầm)
+            // Band 1 (250 - 1500 Hz): +0.4 dB (Giọng chính dày dặn)
+            // Band 2 (1500 - 3400 Hz): +1.0 dB (Tăng độ rõ chữ, sắc nét)
+            // Band 3 (3400 - 6500 Hz): -1.8 dB + De-Esser động (Làm mượt âm gắt)
+            // Band 4 (6500 - 12000 Hz): +0.5 dB (Giữ độ thoáng sáng Air band)
+            val cutoffs = floatArrayOf(250f, 1500f, 3400f, 6500f, 12000f)
+            val eqGains = floatArrayOf(1.6f, 0.4f, 1.0f, -1.8f, 0.5f)
 
             val preEq = dp.getPreEqByChannelIndex(0)
             preEq.isEnabled = true
@@ -225,19 +250,17 @@ class WarmAudioDspProcessor(
                 val band = mbc.getBand(i)
                 band.isEnabled = true
                 band.cutoffFrequency = cutoffs[i]
-                if (i >= 3) {
-                    // Băng tần 3 & 4 (3.2kHz - 12kHz): Hoạt động như một De-Esser chuyên dụng
+                if (i == 3) {
                     band.attackTime = 3.0f
                     band.releaseTime = 65.0f
-                    band.ratio = 3.5f
-                    band.threshold = -21.0f
+                    band.ratio = 2.8f
+                    band.threshold = -20.0f
                     band.kneeWidth = 6.0f
                     band.postGain = 0.0f
                 } else {
-                    // Các băng tần trầm & trung: Không nén để giữ nguyên ngữ điệu tự nhiên
                     band.attackTime = 15.0f
                     band.releaseTime = 100.0f
-                    band.ratio = 1.1f
+                    band.ratio = 1.05f
                     band.threshold = -6.0f
                     band.kneeWidth = 4.0f
                     band.postGain = 0.0f
@@ -251,7 +274,7 @@ class WarmAudioDspProcessor(
             limiter.attackTime = 2.0f
             limiter.releaseTime = 50.0f
             limiter.ratio = 6.0f
-            limiter.threshold = -2.0f
+            limiter.threshold = -1.5f
             limiter.postGain = 0.0f
             dp.setLimiterAllChannelsTo(limiter)
 
@@ -272,11 +295,10 @@ class WarmAudioDspProcessor(
             for (b in 0 until numBands) {
                 val bandIdx = b.toShort()
                 val centerFreqHz = eq.getCenterFreq(bandIdx) / 1000
-                // Chỉ hạ nhẹ dải 3kHz - 7kHz (-300 mB = -3.0 dB), giữ nguyên dải trung
                 val targetMb = when {
-                    centerFreqHz in 150..300 -> 80
-                    centerFreqHz in 3000..7500 -> -320
-                    centerFreqHz > 7500 -> -200
+                    centerFreqHz in 120..300 -> 150
+                    centerFreqHz in 2000..3400 -> 100
+                    centerFreqHz in 3500..6500 -> -180
                     else -> 0
                 }.coerceIn(minLevel, maxLevel).toShort()
                 eq.setBandLevel(bandIdx, targetMb)
