@@ -7,6 +7,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.util.Log
 import com.novelr.reader.service.WarmAudioDspProcessor
+import com.novelr.reader.util.TextSplitter
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -325,16 +326,23 @@ class EdgeTtsEngine(private val context: Context) {
     }
 
     private fun splitFirstShortClause(text: String): Pair<String, String>? {
-        if (text.length < 56) return null
-        val maxScan = minOf(text.length - 18, 75)
-        for (i in 24..maxScan) {
+        // Chỉ tách khi câu rất dài (>= 110 ký tự) và cả 2 vế đều có ít nhất 8 từ (>= 4 từ có dấu Tiếng Việt)
+        // để tuyệt đối không bao giờ tách câu có ít từ hoặc câu cảm thán ngắn.
+        if (text.length < 110) return null
+        val maxScan = minOf(text.length - 36, 95)
+        for (i in 36..maxScan) {
             val ch = text[i]
             if (ch == ',' || ch == ';' || ch == ':' || ch == '–' || ch == '—') {
                 val first = text.substring(0, i + 1).trim()
                 val rest = text.substring(i + 1).trim()
-                val words = first.split(Regex("\\s+")).filter { it.isNotBlank() }
-                val vietWords = words.count { w -> w.any { c -> VIETNAMESE_DIACRITIC_CHARS.indexOf(c) >= 0 } }
-                if (words.size >= 6 && vietWords >= 3 && rest.length >= 16) {
+                if (TextSplitter.isTooShortOrInterjection(first) || TextSplitter.isTooShortOrInterjection(rest)) {
+                    continue
+                }
+                val firstWords = first.split(Regex("\\s+")).filter { it.isNotBlank() }
+                val restWords = rest.split(Regex("\\s+")).filter { it.isNotBlank() }
+                val firstViet = firstWords.count { w -> w.any { c -> VIETNAMESE_DIACRITIC_CHARS.indexOf(c) >= 0 } }
+                val restViet = restWords.count { w -> w.any { c -> VIETNAMESE_DIACRITIC_CHARS.indexOf(c) >= 0 } }
+                if (firstWords.size >= 8 && restWords.size >= 8 && firstViet >= 4 && restViet >= 4) {
                     return first to rest
                 }
             }

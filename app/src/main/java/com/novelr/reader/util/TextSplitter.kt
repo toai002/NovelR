@@ -55,11 +55,23 @@ data class ParsedBookContent(
 object TextSplitter {
 
     private const val MAX_SENTENCE_LENGTH = 180
+    private const val MIN_STANDALONE_WORDS = 4
+    private const val MIN_INTERJECTION_SENTENCE_WORDS = 7
     private const val PLACEHOLDER_DOT = "\u0000"
 
     // Các từ viết tắt phổ biến trong tiếng Việt không nên ngắt câu tại dấu chấm
     private val ABBREVIATIONS_REGEX = Regex(
         "\\b(TP|TS|ThS|PGS|GS|BS|KS|CN|Ths|Mr|Mrs|Ms|Dr|Prof|St|No|Vol)\\.",
+        RegexOption.IGNORE_CASE
+    )
+
+    // Nhận diện câu có chứa từ cảm thán, tiếng cười hoặc lời thoại ngắn dễ bị đọc lỗi nếu tách quá ngắn
+    private val INTERJECTION_DETECTOR_REGEX = Regex(
+        "(?:^|[\\s\"'“”‘’«»「」『』—–-])(?:ha\\s*ha|haha|hà\\s*ha|hà\\s*hà|hi\\s*hi|hihi|hì\\s*hi|hì\\s*hì|" +
+                "he\\s*he|hehe|hê\\s*hê|hề\\s*he|hề\\s*hề|hu\\s*hu|huhu|hù\\s*hu|hù\\s*hù|" +
+                "hô\\s*hô|hoho|ho\\s*ho|hồ\\s*hô|khà\\s*khà|ka\\s*ka|kaka|hắc\\s*hắc|" +
+                "ồ|ố|ổ|ỗ|ộ|oh|à|á|ả|ã|ạ|ah|ơ|ớ|ờ|ở|ỡ|ợ|ừ|ứ|ử|ữ|ự|ưm|ừm|hừ|hứ|hự|hừm|hmm|hm|uhm|um|" +
+                "hả|hở|chà|ái|ối|ôi|ơi|ê|ế|ề|ok|okay|alo)(?=$|[\\s,.!?;:\"'“”‘’«»「」『』…])",
         RegexOption.IGNORE_CASE
     )
 
@@ -72,6 +84,8 @@ object TextSplitter {
      * 1. Danh sách các đoạn văn [ReaderParagraph] giữ nguyên cấu trúc hiển thị tự nhiên trên màn hình đọc.
      * 2. Danh sách các câu phẳng [ParsedBookContent.sentences] cùng ánh xạ vị trí ký tự ngầm [SentenceSpan]
      *    để bộ máy TTS/VieNeu đọc từng câu và hỗ trợ chạm vào chữ bất kỳ để đọc câu đó.
+     * 3. Tự động gộp các dòng cảm thán quá ngắn (như dòng chỉ có `"Ha ha!"`, `"Ồ!"`) vào đoạn kế tiếp
+     *    để không bao giờ tạo ra câu đơn lẻ quá ít từ gây lỗi đọc từ cảm thán.
      */
     fun parseBookContent(
         text: String,
@@ -84,17 +98,19 @@ object TextSplitter {
             .replace("\r", "\n")
             .replace(WHITESPACE_NORMALIZE_REGEX, " ")
 
+        val rawLines = normalized.split("\n")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+
+        val mergedParagraphLines = mergeShortInterjectionParagraphs(rawLines)
+
         val paragraphsResult = ArrayList<ReaderParagraph>()
         val flatSentences = ArrayList<String>()
-        val rawParagraphs = normalized.split("\n")
 
         var globalSentenceIdx = 0
         var paragraphIdx = 0
 
-        for (rawPara in rawParagraphs) {
-            val trimmedPara = rawPara.trim()
-            if (trimmedPara.isEmpty()) continue
-
+        for (trimmedPara in mergedParagraphLines) {
             val paraSentences = splitParagraphIntoSentences(trimmedPara, locale)
             if (paraSentences.isEmpty()) continue
 
@@ -138,10 +154,45 @@ object TextSplitter {
     }
 
     /**
+     * Nếu trong truyện có dòng riêng lẻ chỉ chứa từ cảm thán / câu quá ngắn (<= 3 từ, hoặc <= 6 từ có từ cảm thán
+     * như `"Ha ha!"`, `"Ồ, thế à?"`), gộp dòng đó vào dòng kế tiếp (hoặc dòng trước) để câu luôn đủ ngữ cảnh Tiếng Việt.
+     */
+    private fun mergeShortInterjectionParagraphs(lines: List<String>): List<String> {
+        if (lines.size <= 1) return lines
+        val merged = ArrayList<String>(lines.size)
+        var i = 0
+        while (i < lines.size) {
+            var current = lines[i]
+            while (i + 1 < lines.size && isTooShortOrInterjection(current)) {
+                val next = lines[i + 1]
+                if (current.length + 1 + next.length <= MAX_SENTENCE_LENGTH) {
+                    current = "$current $next"
+                    i++
+                } else {
+                    break
+                }
+            }
+            if (isTooShortOrInterjection(current) && merged.isNotEmpty()) {
+                val prevIdx = merged.lastIndex
+                val prev = merged[prevIdx]
+                if (prev.length + 1 + current.length <= MAX_SENTENCE_LENGTH) {
+                    merged[prevIdx] = "$prev $current"
+                    i++
+                    continue
+                }
+            }
+            merged.add(current)
+            i++
+        }
+        return merged
+    }
+
+    /**
      * Tách văn bản truyện dài thành danh sách các câu chuẩn xác:
      * 1. Bảo toàn các từ viết tắt tiếng Việt (TP. HCM, PGS. TS. Nguyễn Văn A...).
      * 2. Sử dụng BreakIterator theo chuẩn Locale("vi", "VN").
-     * 3. Tự động chia nhỏ các câu quá dài (> 180 ký tự) theo dấu phẩy/chấm phẩy để tránh tràn bộ nhớ ONNX/TTS.
+     * 3. Tự động chia nhỏ các câu quá dài (> 180 ký tự) theo dấu phẩy/chấm phẩy nhưng đảm bảo mỗi vế luôn đủ từ.
+     * 4. Gộp triệt để các câu quá ít từ hoặc câu cảm thán ngắn vào câu liền kề.
      */
     fun splitIntoSentences(text: String, locale: Locale = Locale("vi", "VN")): List<String> {
         return parseBookContent(text, locale).sentences
@@ -176,43 +227,80 @@ object TextSplitter {
             end = iterator.next()
         }
 
-        if (result.isNotEmpty()) {
-            return mergeShortInterjectionSentences(result)
+        val rawList = if (result.isNotEmpty()) {
+            result
+        } else {
+            trimmedPara.split(FALLBACK_PUNCTUATION_REGEX)
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
         }
 
-        return trimmedPara.split(FALLBACK_PUNCTUATION_REGEX)
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
+        return mergeShortInterjectionSentences(rawList)
     }
 
     /**
-     * Gộp các câu cảm thán/tiếng cười quá ngắn (<= 2 từ hoặc <= 10 ký tự như `"Ha ha!"`, `"Ồ!"`, `"Hừ!"`, `"À?"`)
-     * vào câu kế tiếp trong cùng đoạn văn để giữ nguyên ngữ cảnh câu Tiếng Việt và đọc liền mạch tự nhiên.
+     * Kiểm tra một câu có quá ít từ hoặc là câu cảm thán ngắn cần phải gộp với câu bên cạnh hay không:
+     * - Mọi câu có `< 4` từ (1, 2, 3 từ) hoặc `<= 11` ký tự đều được gộp.
+     * - Mọi câu có `< 7` từ mà chứa từ cảm thán/tiếng cười (`"ha ha"`, `"ồ"`, `"hừ"`, `"à"`, `"ok"`...)
+     *   hoặc nằm trong ngoặc kép hội thoại ngắn đều được gộp vào câu kế tiếp/trước đó.
+     */
+    internal fun isTooShortOrInterjection(sentence: String): Boolean {
+        val words = countWords(sentence)
+        if (words < MIN_STANDALONE_WORDS || sentence.length <= 11) {
+            return true
+        }
+        if (words < MIN_INTERJECTION_SENTENCE_WORDS && INTERJECTION_DETECTOR_REGEX.containsMatchIn(sentence)) {
+            return true
+        }
+        return false
+    }
+
+    /**
+     * Gộp hai chiều (tiến & lùi) các câu có ít từ hoặc chứa từ cảm thán ngắn vào câu liền kề trong đoạn văn:
+     * - Bước 1 (Gộp tiến): Nếu câu hiện tại quá ngắn/có từ cảm thán, nối liên tiếp với câu phía sau cho đến khi đủ từ.
+     * - Bước 2 (Gộp lùi): Nếu câu cuối cùng của đoạn văn vẫn quá ngắn (ví dụ `"... Hắn bật cười. Ha ha!"`),
+     *   nối ngược vào câu đứng ngay trước nó.
      */
     private fun mergeShortInterjectionSentences(sentences: List<String>): List<String> {
         if (sentences.size <= 1) return sentences
-        val merged = ArrayList<String>(sentences.size)
+        val forwardMerged = ArrayList<String>(sentences.size)
         var i = 0
         while (i < sentences.size) {
-            val current = sentences[i]
-            val words = countWords(current)
-            if ((words <= 2 || current.length <= 10) && i + 1 < sentences.size) {
+            var current = sentences[i]
+            while (i + 1 < sentences.size && isTooShortOrInterjection(current)) {
                 val next = sentences[i + 1]
                 if (current.length + 1 + next.length <= MAX_SENTENCE_LENGTH) {
-                    merged.add("$current $next")
-                    i += 2
+                    current = "$current $next"
+                    i++
+                } else {
+                    break
+                }
+            }
+            forwardMerged.add(current)
+            i++
+        }
+
+        if (forwardMerged.size <= 1) return forwardMerged
+
+        // Bước 2: Gộp lùi nếu câu ở cuối hoặc giữa vẫn còn quá ngắn
+        val finalMerged = ArrayList<String>(forwardMerged.size)
+        for (sent in forwardMerged) {
+            if (isTooShortOrInterjection(sent) && finalMerged.isNotEmpty()) {
+                val lastIdx = finalMerged.lastIndex
+                val prev = finalMerged[lastIdx]
+                if (prev.length + 1 + sent.length <= MAX_SENTENCE_LENGTH + 40) {
+                    finalMerged[lastIdx] = "$prev $sent"
                     continue
                 }
             }
-            merged.add(current)
-            i++
+            finalMerged.add(sent)
         }
-        return merged
+        return finalMerged
     }
 
     /**
      * Chia nhỏ câu quá dài (> 180 ký tự) tại các ranh giới mệnh đề (, ; : —)
-     * để tối ưu thời gian suy luận ONNX và không vượt giới hạn của Android TTS.
+     * nhưng KHÔNG BAO GIỜ tách ra mệnh đề ngắn dưới 6 từ hoặc mệnh đề cảm thán cô lập.
      */
     private fun splitLongSentence(longSentence: String): List<String> {
         val clauses = longSentence.split(CLAUSE_SPLIT_REGEX)
@@ -223,24 +311,30 @@ object TextSplitter {
             return longSentence.chunked(MAX_SENTENCE_LENGTH).map { it.trim() }
         }
 
-        val result = mutableListOf<String>()
+        val rawChunks = mutableListOf<String>()
         val currentChunk = StringBuilder()
 
         for (clause in clauses) {
             if (currentChunk.isEmpty()) {
                 currentChunk.append(clause)
-            } else if (currentChunk.length + 1 + clause.length <= MAX_SENTENCE_LENGTH) {
-                currentChunk.append(" ").append(clause)
             } else {
-                result.add(currentChunk.toString())
-                currentChunk.clear()
-                currentChunk.append(clause)
+                val currentWords = countWords(currentChunk.toString())
+                val canFit = currentChunk.length + 1 + clause.length <= MAX_SENTENCE_LENGTH
+                // Nếu vế hiện tại còn quá ít từ (< 6 từ), bắt buộc gộp tiếp mệnh đề sau chứ không ngắt sớm
+                if (canFit || currentWords < 6) {
+                    currentChunk.append(" ").append(clause)
+                } else {
+                    rawChunks.add(currentChunk.toString())
+                    currentChunk.clear()
+                    currentChunk.append(clause)
+                }
             }
         }
         if (currentChunk.isNotEmpty()) {
-            result.add(currentChunk.toString())
+            rawChunks.add(currentChunk.toString())
         }
-        return result
+
+        return mergeShortInterjectionSentences(rawChunks)
     }
 
     /**

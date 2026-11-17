@@ -7,6 +7,7 @@ import android.content.Context
 import android.util.Log
 import com.novelr.reader.model.VieNeuModelStatus
 import com.novelr.reader.service.WarmAudioDspProcessor
+import com.novelr.reader.util.TextSplitter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -70,10 +71,11 @@ class VieNeuEngine(private val context: Context) {
         private const val VECTOR_ESTIMATOR_FILE = "vector_estimator.onnx"
         private const val CODEC_DECODER_FILE = "codec_decoder.onnx"
 
-        // Ngưỡng ký tự để tách mệnh đề phát streaming tức thì (~350-450ms cho mệnh đề đầu)
-        private const val STREAM_CLAUSE_MIN_SPLIT_LEN = 52
-        private const val STREAM_CLAUSE_TARGET_LEN = 46
-        private const val STREAM_CLAUSE_MAX_LEN = 82
+        // Ngưỡng ký tự để tách mệnh đề câu dài nhưng tuyệt đối không tạo mệnh đề ít từ (< 6 từ)
+        private const val STREAM_CLAUSE_MIN_SPLIT_LEN = 88
+        private const val STREAM_CLAUSE_TARGET_LEN = 64
+        private const val STREAM_CLAUSE_MAX_LEN = 105
+        private const val MIN_CLAUSE_WORDS = 6
         private val CLAUSE_BOUNDARY_REGEX = Regex("(?<=[,;:])\\s+|\\s+(?=[—–-])")
 
         val MODEL_SPECS = listOf(
@@ -432,23 +434,37 @@ class VieNeuEngine(private val context: Context) {
             if (current.isEmpty()) {
                 current.append(part)
             } else {
-                // Mệnh đề đầu tiên ưu tiên cắt ngắn hơn (~50-75 ký tự) để phát âm thanh ra loa nhanh nhất có thể
+                val curStr = current.toString()
+                val curWords = TextSplitter.countWords(curStr)
                 val limit = if (clauses.isEmpty()) STREAM_CLAUSE_TARGET_LEN else STREAM_CLAUSE_MAX_LEN
-                if (current.length + 1 + part.length <= limit) {
+                // Nếu mệnh đề hiện tại còn ít hơn 6 từ hoặc chứa từ cảm thán ngắn (như "Ha ha,", "Ồ,"),
+                // bắt buộc gộp tiếp phần sau vào chứ KHÔNG BAO GIỜ ngắt thành mệnh đề ít từ
+                if (curWords < MIN_CLAUSE_WORDS ||
+                    TextSplitter.isTooShortOrInterjection(curStr) ||
+                    current.length + 1 + part.length <= limit
+                ) {
                     current.append(" ").append(part)
                 } else {
-                    clauses.add(current.toString())
+                    clauses.add(curStr)
                     current.clear()
                     current.append(part)
                 }
             }
         }
         if (current.isNotEmpty()) {
-            clauses.add(current.toString())
+            val tailStr = current.toString()
+            if (clauses.isNotEmpty() &&
+                (TextSplitter.countWords(tailStr) < MIN_CLAUSE_WORDS || TextSplitter.isTooShortOrInterjection(tailStr))
+            ) {
+                val lastIdx = clauses.lastIndex
+                clauses[lastIdx] = "${clauses[lastIdx]} $tailStr"
+            } else {
+                clauses.add(tailStr)
+            }
         }
 
         return clauses.flatMap { clause ->
-            if (clause.length > STREAM_CLAUSE_MAX_LEN + 25) {
+            if (clause.length > STREAM_CLAUSE_MAX_LEN + 35) {
                 splitByWordCount(clause, maxChars = STREAM_CLAUSE_MAX_LEN)
             } else {
                 listOf(clause)

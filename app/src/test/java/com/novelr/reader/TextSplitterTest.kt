@@ -82,4 +82,19 @@ class TextSplitterTest {
         val coLeOffset = p1.fullText.indexOf("Có lẽ")
         assertEquals(3, p1.findSentenceIndexAtCharOffset(coLeOffset))
     }
+
+    @Test
+    fun `splitIntoSentences should merge short interjection sentences forward and backward`() {
+        val sampleText = """
+            "Ha ha!"
+            "Ồ, thế à?"
+            Hắn khẽ mỉm cười nhìn người trước mặt rồi bước tới. Hừ!
+        """.trimIndent()
+
+        val sentences = TextSplitter.splitIntoSentences(sampleText)
+        assertEquals(1, sentences.size)
+        assertTrue(sentences[0].contains("Ha ha!"))
+        assertTrue(sentences[0].contains("Ồ, thế à?"))
+        assertTrue(sentences[0].contains("Hừ!"))
+    }
 }
